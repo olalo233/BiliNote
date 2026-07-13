@@ -119,3 +119,34 @@ def test_storage_source_routes_accept_minio_type_and_feature_scope(monkeypatch, 
     assert response_body(response)["data"]["name"] == "image-source"
     assert manager.get_source("image-source")["type"] == "minio"
     assert manager.get_source("image-source")["feature"] == "image_bed"
+
+
+def test_storage_test_uses_explicit_prefix_for_unbound_source(monkeypatch, tmp_path):
+    manager = StorageConfigManager(str(tmp_path / "storage.json"))
+    manager.upsert_source("image-source", source_payload())
+    monkeypatch.setattr(storage_router, "storage_config_manager", manager)
+
+    operations = []
+    monkeypatch.setattr(
+        storage_router.object_storage,
+        "put_file",
+        lambda source, key, filepath, content_type: operations.append(
+            ("put", source, key, content_type)
+        ),
+    )
+    monkeypatch.setattr(
+        storage_router.object_storage,
+        "get_bytes",
+        lambda source, key: operations.append(("get", source, key)),
+    )
+    monkeypatch.setattr(
+        storage_router.object_storage,
+        "delete_object",
+        lambda source, key: operations.append(("delete", source, key)),
+    )
+
+    response = storage_router.test_storage_source("image-source", prefix="bilinote")
+
+    assert response_body(response)["code"] == 0
+    assert operations[0][2].startswith("bilinote/_probe/")
+    assert [operation[0] for operation in operations] == ["put", "get", "delete"]

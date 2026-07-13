@@ -123,7 +123,7 @@ def _failed_steps(message: str) -> dict[str, dict[str, object]]:
 
 
 @router.post("/storage/test/{name}")
-def test_storage_source(name: str):
+def test_storage_source(name: str, prefix: str | None = None):
     config = _manager().get_config()
     source = config.get("sources", {}).get(name)
     if not source:
@@ -133,7 +133,12 @@ def test_storage_source(name: str):
     configured_prefix = ""
     if feature.get("source") == name:
         configured_prefix = str(feature.get("path_prefix") or "").strip("/")
-    probe_prefix = f"{configured_prefix}/" if configured_prefix else ""
+    probe_prefix_value = (
+        str(prefix).strip("/") if prefix is not None else configured_prefix
+    )
+    if any(part in {".", ".."} for part in probe_prefix_value.split("/")):
+        raise HTTPException(status_code=400, detail="非法探针前缀")
+    probe_prefix = f"{probe_prefix_value}/" if probe_prefix_value else ""
     key = f"{probe_prefix}_probe/{uuid.uuid4()}"
     steps = _failed_steps("")
     probe_path: Path | None = None

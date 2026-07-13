@@ -88,8 +88,11 @@ export const deleteStorageSource = (name: string) =>
 export const saveStorageFeature = (payload: StorageFeaturePayload) =>
   request.post('/storage/feature', payload, { suppressToast: true })
 
-export const testStorageSource = (name: string): Promise<StorageTestResult> =>
-  request.post(`/storage/test/${encodeURIComponent(name)}`, undefined, { suppressToast: true })
+export const testStorageSource = (name: string, prefix = ''): Promise<StorageTestResult> =>
+  request.post(`/storage/test/${encodeURIComponent(name)}`, undefined, {
+    params: prefix ? { prefix } : undefined,
+    suppressToast: true,
+  })
 
 export const getStorageUsage = (feature: StorageFeature, refresh = false): Promise<StorageUsage> =>
   request.get(`/storage/usage/${feature}`, {
