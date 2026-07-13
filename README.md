@@ -180,6 +180,8 @@ docker run -d -p 80:80 \
   ghcr.io/jefferyhcool/bilinote:latest
 ```
 
+如需在容器启动时自动更新 yt-dlp，可设置 `YTDLP_AUTO_UPDATE=1`（默认关闭，需容器能访问 PyPI）。
+
 上面四个卷分别持久化：`data`（SQLite 数据库 + 生成的笔记）、`config`（LLM 供应商配置 / Cookie / 转写设置）、`static`（笔记引用的视频截图）、`models`（Whisper 模型缓存，可选，避免每次重新下载）。这样 `docker pull` 升级新镜像、删旧容器重建后，配置和历史都不会丢。
 
 > ⚠️ **不要**用 `-v 卷名:/app/backend` 挂整个后端目录——命名卷会用首次启动时的镜像内容固化，之后 `docker pull` 升级也会被旧代码盖住，导致「升级不生效」。只挂上面这些数据子目录即可。
