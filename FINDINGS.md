@@ -1,9 +1,10 @@
-# v2.4.5 Docker 发布验证记录
+# v2.4.5e Docker 发布验证记录
 
 ## 已完成的本地验证
 
 - 执行器测试修复 commit：`0429de4`。
 - Docker 发布 workflow 与运行时透传 commit：`2f9ea5c`。
+- fork-only 版本号兼容 commit：`91a7c68`。
 - `PYTHONPATH=backend /tmp/bilinote-t1-venv/bin/python -m pytest -q backend/tests/test_task_serial_executor.py`：`4 passed`。
 - `PYTHONPATH=backend /tmp/bilinote-t1-venv/bin/python -m pytest -q backend/tests`：`54 passed, 3 subtests passed`。
 - `CI=1 corepack pnpm@9.15.0 install --frozen-lockfile`：通过。
@@ -14,13 +15,14 @@
 
 ## 已实现的 fork-only 发布验证
 
-- `.github/workflows/docker-build.yml` 固定 `linux/amd64`，tag 构建明确校验 `2.4.5` 与 `latest`，并增加镜像 smoke job。
+- `.github/workflows/docker-build.yml` 固定 `linux/amd64`，并对任意 `v*` tag 生成去掉前缀 `v` 的原始镜像 tag；本次 `v2.4.5e` 对应 `2.4.5e` 与 `latest`，同时增加镜像 smoke job。
+- `v2.4.5e` 不是严格 SemVer，因此桌面端和浏览器扩展 workflow 会跳过该 fork-only tag；本次发布范围保持为 Docker。
 - smoke job 覆盖首页、`/settings/model` 资源路径和 JavaScript content type、模型/健康路由、deno、锁定的 yt-dlp 版本、Cookie 增删查及重复删除、`YTDLP_AUTO_UPDATE` 默认关闭与失败降级、YouTube/B 站格式探测。
 - YouTube/B 站实时格式探测若受 runner 网络限制只产生 warning，需在可访问 Linux/NAS 环境补做同一命令。
 - `Dockerfile.complete` 将 `PIP_INDEX_URL` 透传给 supervisor backend，支持验证自动更新失败时 backend 仍启动。
 
-## 发布前阻塞项
+## 远端发布状态
 
-- 本机 `gh auth status` 显示 fork token 已失效，无法读取 Actions/GHCR 私有状态或执行远端 tag 操作。
-- fork 现有 `v2.4.5` tag 指向 `bc487c6`，且 GitHub Release 已存在并包含扩展与桌面端资产。删除并重建该 tag 可能影响已有消费者；在用户确认保护策略并完成 GitHub 重新认证前，不执行远端 tag 删除、Release 删除或 GHCR 发布。
-- 当前验证分支已推送到 `origin/codex/v245-docker-validation`；未向 `upstream` 创建 PR 或推送。
+- fork 现有 `v2.4.5` tag 仍指向 `bc487c6`，且对应 GitHub Release 包含扩展与桌面端资产；本次不删除、不改写旧 tag/Release。
+- 修复后的 fork `master` 提交为 `91a7c68`；下一步在该提交上创建 annotated `v2.4.5e` 并只推送到 `origin`。
+- 未向 `upstream` 创建 PR 或推送。
