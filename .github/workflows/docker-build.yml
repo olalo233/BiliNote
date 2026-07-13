@@ -11,7 +11,9 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build-and-push:
+  # 单 job 串行：build（仅 load 到本机）→ smoke 验证 → 全部通过才 push。
+  # 曾经的两 job 结构（先 push 后 smoke）会把未经验证的镜像发布成 latest。
+  build-test-push:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -64,12 +66,13 @@ jobs:
           grep -Fx "$IMAGE:$VERSION" <<< "$IMAGE_TAGS"
           grep -Fx "$IMAGE:latest" <<< "$IMAGE_TAGS"
 
-      - name: Build and Push Docker Image
+      - name: Build Docker Image (load only, no push)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.complete
-          push: true
+          push: false
+          load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
@@ -77,42 +80,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
-
-      - name: Generate Usage Instructions
-        run: |
-          echo "=========================================="
-          echo "Docker Image Published!"
-          echo "=========================================="
-          echo ""
-          echo "Pull the image:"
-          echo "  docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
-          echo ""
-          echo "Run the container:"
-          echo "  docker run -d -p 80:80 \\"
-          echo "    -v bilinote-data:/app/backend/data \\"
-          echo "    -v bilinote-config:/app/backend/config \\"
-          echo "    -v bilinote-static:/app/backend/static \\"
-          echo "    -v bilinote-models:/app/backend/models \\"
-          echo "    --name bilinote \\"
-          echo "    ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
-          echo ""
-          echo "Access the application at: http://localhost"
-          echo "=========================================="
-
-  smoke-test:
-    name: Smoke test published amd64 image
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    permissions:
-      packages: read
-
-    steps:
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run image smoke tests
         shell: bash
@@ -130,15 +97,19 @@ jobs:
             docker rm -f "$CONTAINER" "$CONTAINER-auto" >/dev/null 2>&1 || true
           }
           write_diagnostics() {
+            # 除 docker logs（supervisord 输出）外，必须收容器内 backend.log——
+            # python 的 traceback 只在那里，缺了它排障就是盲猜。
             docker logs "$CONTAINER" > "$DIAG_DIR/default-container.log" 2>&1 || true
             docker logs "$CONTAINER-auto" > "$DIAG_DIR/auto-update-container.log" 2>&1 || true
+            docker exec "$CONTAINER" cat /var/log/supervisor/backend.log > "$DIAG_DIR/default-backend.log" 2>&1 || true
+            docker exec "$CONTAINER-auto" cat /var/log/supervisor/backend.log > "$DIAG_DIR/auto-update-backend.log" 2>&1 || true
             {
               echo "### Docker smoke diagnostics"
               echo "Image: $IMAGE_REF"
-              echo "Default container logs:"
-              sed -n '1,240p' "$DIAG_DIR/default-container.log"
-              echo "Auto-update container logs:"
-              sed -n '1,240p' "$DIAG_DIR/auto-update-container.log"
+              for f in default-container auto-update-container default-backend auto-update-backend; do
+                echo "--- $f.log ---"
+                sed -n '1,240p' "$DIAG_DIR/$f.log" 2>/dev/null || true
+              done
             } >> "${GITHUB_STEP_SUMMARY:-$DIAG_DIR/summary.md}"
           }
           on_exit() {
@@ -151,7 +122,6 @@ jobs:
           }
           trap on_exit EXIT
 
-          docker pull "$IMAGE_REF"
           docker run -d --name "$CONTAINER" --platform linux/amd64 -p 18080:80 "$IMAGE_REF"
 
           for attempt in $(seq 1 60); do
@@ -196,15 +166,16 @@ jobs:
           curl -fsS -X DELETE http://127.0.0.1:18080/api/delete_downloader_cookie/youtube
           curl -fsS http://127.0.0.1:18080/api/get_downloader_cookie/youtube | grep -F '未找到Cookies'
 
+          # 自更新失败降级场景：坏 PyPI 源 + 开启自更新，验证「升级失败仍用内置版本启动」。
+          # 注意：不要卸载 yt-dlp——backend 顶层 import yt_dlp，卸载后必然起不来，
+          # 那测的是「内置版本不存在」而非「升级失败降级」（2026-07-13 曾因此误伤排障 2 小时）。
           docker run -d --name "$CONTAINER-auto" --platform linux/amd64 \
             -p 18081:80 \
             -e YTDLP_AUTO_UPDATE=1 \
             -e PIP_INDEX_URL=http://127.0.0.1:1/simple \
             -e PIP_RETRIES=0 \
             -e PIP_DEFAULT_TIMEOUT=1 \
-            --entrypoint sh \
-            "$IMAGE_REF" \
-            -c 'pip uninstall -y yt-dlp >/dev/null 2>&1 || true; exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf'
+            "$IMAGE_REF"
           for attempt in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:18081/api/sys_health >/dev/null; then
               break
@@ -216,6 +187,7 @@ jobs:
             fi
             sleep 2
           done
+          test "$(docker exec "$CONTAINER-auto" python -m yt_dlp --version)" = "2026.07.04"
           if ! docker exec "$CONTAINER-auto" sh -c 'grep -F "[ytdlp-auto-update] 升级失败" /var/log/supervisor/backend.log'; then
             docker logs "$CONTAINER-auto" || true
             echo '::error title=Auto-update fallback missing::backend did not log the expected failed-update fallback.'
@@ -249,3 +221,36 @@ jobs:
           name: bilinote-smoke-diagnostics-${{ github.run_id }}
           path: ${{ runner.temp }}/bilinote-smoke/
           if-no-files-found: ignore
+
+      - name: Push verified image tags
+        shell: bash
+        env:
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            docker push "$tag"
+          done <<< "$IMAGE_TAGS"
+
+      - name: Generate Usage Instructions
+        run: |
+          echo "=========================================="
+          echo "Docker Image Published!"
+          echo "=========================================="
+          echo ""
+          echo "Pull the image:"
+          echo "  docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          echo ""
+          echo "Run the container:"
+          echo "  docker run -d -p 80:80 \\"
+          echo "    -v bilinote-data:/app/backend/data \\"
+          echo "    -v bilinote-config:/app/backend/config \\"
+          echo "    -v bilinote-static:/app/backend/static \\"
+          echo "    -v bilinote-models:/app/backend/models \\"
+          echo "    --name bilinote \\"
+          echo "    ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          echo ""
+          echo "Access the application at: http://localhost"
+          echo "=========================================="
+
