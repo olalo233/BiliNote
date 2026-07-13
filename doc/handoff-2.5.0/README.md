@@ -73,5 +73,8 @@ T1 是地基必须最先；T2/T3 依赖 T1 可并行；T4 依赖 T3；T5 依赖 
 - 图床源：bucket `img`（已存在，public-read），public_base_url `http://img.expii.top:9000/img`，
   path_prefix `bilinote`。
 - 资产源：bucket `bilinote-assets`（**需在 MinIO 上新建，private**）。
+- 权限模型（已配好并实测）：用户 `bilinote` 挂 `bilinote-rw` 策略——
+  `bilinote-assets` 整桶读写；`img` 桶仅 `bilinote/*` 前缀读写删列（IAM prefix Condition），
+  桶根与其他前缀均拒绝。代码中所有 img 桶操作必须落在 path_prefix 之下。
 - access key：用户会在 MinIO Console 给 BiliNote 建受限 key（两桶读写），执行者测试期间
   可先用用户提供的测试 key（找用户要，不要自己造/翻配置文件）。

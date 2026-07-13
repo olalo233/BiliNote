@@ -39,8 +39,12 @@
 - `POST /api/storage/source`：新建/更新源（传全量字段；更新时 secret 传打码值则保留旧值）。
 - `DELETE /api/storage/source/{name}`：删除源；被功能引用时返回 400 与提示。
 - `POST /api/storage/feature`：更新 image_bed / assets 功能绑定与设置。
-- `POST /api/storage/test/{name}`：测试连接——PUT 1 字节探针 `\_probe/{uuid}` → GET → DELETE，
-  返回三步结果；若该源被 image_bed 引用，额外匿名 GET `public_base_url` 下的探针验证公开可读。
+- `POST /api/storage/test/{name}?prefix=...`：测试连接——PUT 1 字节探针
+  `{prefix 或空}/_probe/{uuid}` → GET → DELETE，返回三步结果。
+  ⚠️ 探针 key 必须带 prefix 参数（前端从图床页调用时传 path_prefix）：
+  用户实例的 img 桶权限是**前缀限定**的（IAM Condition 限制 `bilinote/*`），
+  桶根探针会误报失败。若该源被 image_bed 引用，额外匿名 GET
+  `public_base_url` 下的探针验证公开可读。
 
 ## 验收标准
 
