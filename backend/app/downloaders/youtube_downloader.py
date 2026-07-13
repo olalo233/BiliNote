@@ -25,6 +25,23 @@ def _apply_proxy(ydl_opts: dict) -> dict:
     return ydl_opts
 
 
+def _build_download_options(output_path: str, skip_download: bool = False) -> dict:
+    """Build yt-dlp options for media download or metadata-only extraction."""
+    options = {
+        'format': 'bestaudio[ext=m4a]/bestaudio/best',
+        'outtmpl': output_path,
+        'noplaylist': True,
+        'quiet': False,
+    }
+    if skip_download:
+        # Metadata extraction must not select a media format. A video may expose
+        # subtitles and page metadata even when no playable stream is available.
+        options['skip_download'] = True
+        options.pop('format', None)
+        options['ignore_no_formats_error'] = True
+    return options
+
+
 class YoutubeDownloader(Downloader, ABC):
     def __init__(self):
 
@@ -46,15 +63,7 @@ class YoutubeDownloader(Downloader, ABC):
 
         output_path = os.path.join(output_dir, "%(id)s.%(ext)s")
 
-        ydl_opts = {
-            'format': 'bestaudio[ext=m4a]/bestaudio/best',
-            'outtmpl': output_path,
-            'noplaylist': True,
-            'quiet': False,
-        }
-
-        if skip_download:
-            ydl_opts['skip_download'] = True
+        ydl_opts = _build_download_options(output_path, skip_download)
 
         _apply_proxy(ydl_opts)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
