@@ -129,7 +129,10 @@ autorestart=true
 priority=10
 
 [program:backend]
-command=sh -c 'if [ "$YTDLP_AUTO_UPDATE" = "1" ]; then pip install --no-cache-dir -U yt-dlp || echo "[ytdlp-auto-update] 升级失败，继续用镜像内置版本"; fi; exec python main.py'
+; ⚠ 本文件经 Dockerfile 未加引号的 COPY <<EOF 写入，构建期会展开美元符变量
+; （曾把开关固化成 0 导致运行时永远关闭）。这里刻意不用 shell 变量，
+; 改用 supervisord 自身的 %(ENV_x)s 运行时展开——BuildKit/buildah 都不会碰它。
+command=sh -c 'if [ "%(ENV_YTDLP_AUTO_UPDATE)s" = "1" ]; then pip install --no-cache-dir -U yt-dlp || echo "[ytdlp-auto-update] 升级失败，继续用镜像内置版本"; fi; exec python main.py'
 directory=/app/backend
 stdout_logfile=/var/log/supervisor/backend.log
 stderr_logfile=/var/log/supervisor/backend.log

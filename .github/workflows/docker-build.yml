@@ -152,7 +152,7 @@ jobs:
           curl -fsS http://127.0.0.1:18080/api/sys_health >/tmp/sys-health.json
           docker exec "$CONTAINER" deno --version | grep -Eq '^deno [0-9]+\.'
           test "$(docker exec "$CONTAINER" python -m yt_dlp --version)" = "2026.07.04"
-          if docker exec "$CONTAINER" sh -c 'grep -Eq "Collecting yt-dlp|Downloading yt-dlp" /var/log/supervisor/backend.log'; then
+          if docker exec "$CONTAINER" sh -c 'grep -Fq "Looking in indexes" /var/log/supervisor/backend.log'; then
             docker logs "$CONTAINER" || true
             echo '::error title=Unexpected default auto-update::default container attempted a yt-dlp update.'
             exit 1
@@ -166,9 +166,13 @@ jobs:
           curl -fsS -X DELETE http://127.0.0.1:18080/api/delete_downloader_cookie/youtube
           curl -fsS http://127.0.0.1:18080/api/get_downloader_cookie/youtube | grep -F '未找到Cookies'
 
-          # 自更新失败降级场景：坏 PyPI 源 + 开启自更新，验证「升级失败仍用内置版本启动」。
-          # 注意：不要卸载 yt-dlp——backend 顶层 import yt_dlp，卸载后必然起不来，
-          # 那测的是「内置版本不存在」而非「升级失败降级」（2026-07-13 曾因此误伤排障 2 小时）。
+          # 自更新场景：坏 PyPI 源 + 开启自更新。断言三件事：开关生效（pip 确实跑了）、
+          # backend 照常健康、内置 yt-dlp 版本不被破坏。
+          # 两个历史教训（2026-07-13）：
+          # 1) 不要卸载 yt-dlp 来"制造失败"——backend 顶层 import yt_dlp，卸载后必然起不来，
+          #    测的是「包不存在」而非「升级失败降级」；
+          # 2) 不要断言具体的"升级失败"消息——pip install -U 对已安装的包即使索引不可达
+          #    也可能打印 Requirement already satisfied 后 exit 0，失败根本造不出来。
           docker run -d --name "$CONTAINER-auto" --platform linux/amd64 \
             -p 18081:80 \
             -e YTDLP_AUTO_UPDATE=1 \
@@ -188,9 +192,9 @@ jobs:
             sleep 2
           done
           test "$(docker exec "$CONTAINER-auto" python -m yt_dlp --version)" = "2026.07.04"
-          if ! docker exec "$CONTAINER-auto" sh -c 'grep -F "[ytdlp-auto-update] 升级失败" /var/log/supervisor/backend.log'; then
+          if ! docker exec "$CONTAINER-auto" sh -c 'grep -Fq "Looking in indexes" /var/log/supervisor/backend.log'; then
             docker logs "$CONTAINER-auto" || true
-            echo '::error title=Auto-update fallback missing::backend did not log the expected failed-update fallback.'
+            echo '::error title=Auto-update switch inert::YTDLP_AUTO_UPDATE=1 did not trigger a pip run (check supervisord command expansion).'
             exit 1
           fi
 
