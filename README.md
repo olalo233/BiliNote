@@ -3,7 +3,7 @@
     <p align="center">
   <img src="./doc/icon.svg" alt="BiliNote Banner" width="50" height="50"  />
 </p>
-<h1 align="center" > BiliNote v2.4.5</h1>
+<h1 align="center" > BiliNote v2.5.0-ex</h1>
 </div>
 
 <p align="center"><i>AI 视频笔记生成工具 让 AI 为你的视频做笔记</i></p>
@@ -80,6 +80,9 @@ BiliNote 是一个开源的 AI 视频笔记助手，支持通过哔哩哔哩、Y
 - 基于 RAG 的笔记内容 AI 问答（支持 Function Calling）
 - 笔记顶部视频封面 Banner 展示
 - 工作区和生成历史面板支持折叠/展开
+- 图床：截图可上传到 MinIO / S3 对象存储，Markdown 使用公网绝对 URL
+- 资产归档与资源包：异步归档视频资源，支持查看、预签名下载、删除和恢复
+- 存储用量：设置页显示对象数、总大小、最近上传和资产类型明细
 
 ### v2.3.0 新增
 
@@ -95,6 +98,13 @@ BiliNote 是一个开源的 AI 视频笔记助手，支持通过哔哩哔哩、Y
 - 有平台字幕时，即使媒体元信息提取失败也会降级生成纯文字笔记。
 - 设置页支持删除下载器 Cookie；任务失败时在 toast 和历史任务卡片中显示具体原因。
 - Web/Docker 构建修复设置页多级路由刷新白屏，Tauri 构建继续使用相对资源路径。
+
+### v2.5.0-ex 新增
+
+- fork `olalo233/BiliNote` 的扩展发行版，新增可选的 MinIO / S3 对象存储批次。
+- 「图床设置」和「资产设置」分别维护供应商列表；添加供应商后再进入对应功能详情，不混用两套配置。
+- 图床上传截图到 `img` 等公开桶；资产归档写入 `bilinote-assets` 等私有桶，资源包访问使用预签名 URL。
+- 资产归档不阻塞笔记主链路；设置页可以测试连接、查看用量、刷新缓存，并按对象类型查看明细。
 
 ### v2.2.3 修订
 
@@ -176,7 +186,7 @@ BiliNote 是一个开源的 AI 视频笔记助手，支持通过哔哩哔哩、Y
 确保已安装 Docker，直接拉取预构建镜像运行：
 
 ```bash
-docker pull ghcr.io/jefferyhcool/bilinote:latest
+  docker pull ghcr.io/olalo233/bilinote:latest
 
 docker run -d -p 80:80 \
   -v bilinote-data:/app/backend/data \
@@ -184,12 +194,53 @@ docker run -d -p 80:80 \
   -v bilinote-static:/app/backend/static \
   -v bilinote-models:/app/backend/models \
   --name bilinote \
-  ghcr.io/jefferyhcool/bilinote:latest
+  ghcr.io/olalo233/bilinote:latest
 ```
 
 如需在容器启动时自动更新 yt-dlp，可设置 `YTDLP_AUTO_UPDATE=1`（默认关闭，需容器能访问 PyPI）。
 
 上面四个卷分别持久化：`data`（SQLite 数据库 + 生成的笔记）、`config`（LLM 供应商配置 / Cookie / 转写设置）、`static`（笔记引用的视频截图）、`models`（Whisper 模型缓存，可选，避免每次重新下载）。这样 `docker pull` 升级新镜像、删旧容器重建后，配置和历史都不会丢。
+
+#### 对象存储配置（可选）
+
+图床和资产归档默认关闭，不配置时保持原有本地存储行为。使用 Docker 时，把下面内容保存到持久化的 `config` 卷中的 `storage.json`（宿主机源码部署对应 `backend/config/storage.json`；容器内路径为 `/app/backend/config/storage.json`）。示例使用本项目测试实例的 endpoint 和桶名，凭据必须替换为你自己的值，不能把真实 secret 提交到仓库：
+
+```json
+{
+  "sources": {
+    "minio-img": {
+      "type": "minio",
+      "endpoint": "img.expii.top:9000",
+      "access_key": "YOUR_ACCESS_KEY",
+      "secret_key": "YOUR_SECRET_KEY",
+      "bucket": "img",
+      "path_style": true,
+      "use_ssl": false
+    },
+    "minio-assets": {
+      "type": "minio",
+      "endpoint": "img.expii.top:9000",
+      "access_key": "YOUR_ACCESS_KEY",
+      "secret_key": "YOUR_SECRET_KEY",
+      "bucket": "bilinote-assets",
+      "path_style": true,
+      "use_ssl": false
+    }
+  },
+  "image_bed": {
+    "enabled": true,
+    "source": "minio-img",
+    "public_base_url": "http://img.expii.top:9000/img",
+    "path_prefix": "bilinote"
+  },
+  "assets": {
+    "enabled": true,
+    "source": "minio-assets"
+  }
+}
+```
+
+`img` 桶中图床使用的路径需要允许匿名读取；`bilinote-assets` 应保持私有，资源包通过后端生成的预签名 URL 访问。生产环境建议为两个桶建立最小权限 access key，并在 Zspace/NAS 上只通过配置卷注入 secret。
 
 > ⚠️ **不要**用 `-v 卷名:/app/backend` 挂整个后端目录——命名卷会用首次启动时的镜像内容固化，之后 `docker pull` 升级也会被旧代码盖住，导致「升级不生效」。只挂上面这些数据子目录即可。
 
@@ -213,7 +264,7 @@ docker-compose -f docker-compose.gpu.yml up --build -d
 
 `docker-compose build` 拉 `python:3.11-slim` / `node:20-alpine` / `nginx:1.25-alpine` 时连 `auth.docker.io` 超时。三种解法，按推荐顺序：
 
-- **方法 A：直接用预构建镜像（最省事）**——不要本地 build，跳到上面的 `docker pull ghcr.io/jefferyhcool/bilinote:latest` 路径，ghcr.io 在国内通常比 docker.io 顺。
+- **方法 A：直接用预构建镜像（最省事）**——不要本地 build，跳到上面的 `docker pull ghcr.io/olalo233/bilinote:latest` 路径，ghcr.io 在国内通常比 docker.io 顺。
 - **方法 B：配置 Docker daemon 镜像加速器**——编辑 `~/.docker/daemon.json`（Linux 在 `/etc/docker/daemon.json`），加：
   ```json
   {
@@ -355,7 +406,7 @@ docker-compose -f docker-compose.gpu.yml up --build -d   # 用 GPU 栈重建
 
 ```bash
 # 拉取最新镜像
-docker pull ghcr.io/jefferyhcool/bilinote:latest
+  docker pull ghcr.io/olalo233/bilinote:latest
 
 # 运行容器
 docker run -d -p 80:80 \
@@ -364,7 +415,7 @@ docker run -d -p 80:80 \
   -v bilinote-static:/app/backend/static \
   -v bilinote-models:/app/backend/models \
   --name bilinote \
-  ghcr.io/jefferyhcool/bilinote:latest
+  ghcr.io/olalo233/bilinote:latest
 ```
 
 上面四个卷分别持久化：`data`（SQLite 数据库 + 生成的笔记）、`config`（LLM 供应商配置 / Cookie / 转写设置）、`static`（笔记引用的视频截图）、`models`（Whisper 模型缓存，可选，避免每次重新下载）。这样 `docker pull` 升级新镜像、删旧容器重建后，配置和历史都不会丢。

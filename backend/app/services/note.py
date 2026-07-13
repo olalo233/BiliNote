@@ -3,6 +3,7 @@ import logging
 import os
 import re
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Tuple, Union, Any
 
@@ -30,6 +31,9 @@ from app.models.notes_model import AudioDownloadResult, NoteResult
 from app.models.transcriber_model import TranscriptResult, TranscriptSegment
 from app.services.constant import SUPPORT_PLATFORM_MAP
 from app.services.provider import ProviderService
+from app.services import object_storage
+from app.services.object_storage import ObjectStorageError
+from app.services.storage_config_manager import storage_config_manager
 from app.transcriber.base import Transcriber
 from app.transcriber.transcriber_provider import get_transcriber, _transcribers
 from app.utils.note_helper import replace_content_markers, prepend_source_link
@@ -55,6 +59,12 @@ NOTE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 IMAGE_OUTPUT_DIR = os.getenv("OUT_DIR", "./static/screenshots")
 # 图片基础 URL（用于生成 Markdown 中的图片链接，需前端静态目录对应）
 IMAGE_BASE_URL = os.getenv("IMAGE_BASE_URL", "/static/screenshots")
+IMAGE_CONTENT_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
 
 # 日志配置
 logger = logging.getLogger(__name__)
@@ -103,6 +113,7 @@ class NoteGenerator:
         video_understanding: bool = False,
         video_interval: int = 0,
         grid_size: Optional[List[int]] = None,
+        archive_video: bool = False,
     ) -> NoteResult | None:
         """
         主流程：按步骤依次下载、转写、GPT 总结、截图/链接处理、存库、返回 NoteResult。
@@ -135,6 +146,7 @@ class NoteGenerator:
 
             downloader = self._get_downloader(platform)
             gpt = self._get_gpt(model_name, provider_id)
+            video_id = extract_video_id(str(video_url), platform)
 
             # 缓存文件路径
             audio_cache_file = NOTE_OUTPUT_DIR / f"{task_id}_audio.json"
@@ -142,6 +154,7 @@ class NoteGenerator:
             markdown_cache_file = NOTE_OUTPUT_DIR / f"{task_id}_markdown.md"
             # 1. 获取字幕/转写：优先缓存 → 平台字幕 → 音频转写
             transcript = None
+            restored_from_assets = False
 
             # 尝试读取缓存
             if transcript_cache_file.exists():
@@ -157,6 +170,16 @@ class NoteGenerator:
                     logger.info(f"已从缓存加载转写结果，共 {len(segments)} 段")
                 except Exception as e:
                     logger.warning(f"加载转写缓存失败: {e}")
+
+            # 本地任务缓存没有命中时，先从资产桶恢复，避免源站不可达时丢失收藏内容。
+            if transcript is None and video_id:
+                try:
+                    from app.services.asset_archive import restore_transcript
+
+                    transcript = restore_transcript(platform, video_id, transcript_cache_file)
+                    restored_from_assets = transcript is not None
+                except Exception as exc:
+                    logger.warning("从资产桶还原转写失败 video_id=%s: %s", video_id, exc)
 
             # 缓存没有，尝试获取平台字幕
             if transcript is None:
@@ -182,20 +205,37 @@ class NoteGenerator:
             need_full_download = not has_transcript or screenshot or video_understanding
             media_degraded = False
             try:
-                audio_meta = self._download_media(
-                    downloader=downloader,
-                    video_url=video_url,
-                    quality=quality,
-                    audio_cache_file=audio_cache_file,
-                    status_phase=TaskStatus.DOWNLOADING,
-                    platform=platform,
-                    output_path=output_path,
-                    screenshot=screenshot,
-                    video_understanding=video_understanding,
-                    video_interval=video_interval,
-                    grid_size=grid_size,
-                    skip_download=not need_full_download,
-                )
+                if restored_from_assets and not screenshot and not video_understanding:
+                    audio_meta = AudioDownloadResult(
+                        file_path="",
+                        title=video_id or str(video_url),
+                        duration=0,
+                        cover_url=None,
+                        platform=platform,
+                        video_id=video_id or str(video_url),
+                        raw_info={"tags": []},
+                        video_path=None,
+                    )
+                    audio_cache_file.write_text(
+                        json.dumps(asdict(audio_meta), ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                    logger.info("已从资产桶还原转写，跳过源站媒体元信息请求 video_id=%s", video_id)
+                else:
+                    audio_meta = self._download_media(
+                        downloader=downloader,
+                        video_url=video_url,
+                        quality=quality,
+                        audio_cache_file=audio_cache_file,
+                        status_phase=TaskStatus.DOWNLOADING,
+                        platform=platform,
+                        output_path=output_path,
+                        screenshot=screenshot,
+                        video_understanding=video_understanding,
+                        video_interval=video_interval,
+                        grid_size=grid_size,
+                        skip_download=not need_full_download,
+                    )
             except Exception as exc:
                 if not has_transcript:
                     raise
@@ -221,6 +261,9 @@ class NoteGenerator:
                     else "不含媒体信息",
                     exc,
                 )
+
+            if self.video_path and not audio_meta.video_path:
+                audio_meta.video_path = str(self.video_path)
 
             # 3. 如果前面没拿到字幕，走转写流程
             if transcript is None:
@@ -258,6 +301,7 @@ class NoteGenerator:
                     formats=effective_formats,
                     audio_meta=audio_meta,
                     platform=platform,
+                    task_id=task_id,
                 )
 
             markdown = prepend_source_link(markdown, str(video_url))
@@ -662,6 +706,7 @@ class NoteGenerator:
         formats: List[str],
         audio_meta: AudioDownloadResult,
         platform: str,
+        task_id: Optional[str] = None,
     ) -> str:
         """
         对生成的 Markdown 做后期处理：插入截图和/或插入链接。
@@ -675,7 +720,7 @@ class NoteGenerator:
         """
         if "screenshot" in formats and video_path:
             try:
-                markdown = self._insert_screenshots(markdown, video_path)
+                markdown = self._insert_screenshots(markdown, video_path, task_id=task_id)
             except Exception as exc:
                 logger.warning("截图插入失败，跳过该步骤")
 
@@ -687,7 +732,12 @@ class NoteGenerator:
 
         return markdown
 
-    def _insert_screenshots(self, markdown: str, video_path: Path) -> str | None | Any:
+    def _insert_screenshots(
+        self,
+        markdown: str,
+        video_path: Path,
+        task_id: Optional[str] = None,
+    ) -> str | None | Any:
         """
         扫描 Markdown 文本中所有 Screenshot 标记，并替换为实际生成的截图链接。
 
@@ -701,13 +751,58 @@ class NoteGenerator:
                 img_path = generate_screenshot(str(video_path), str(IMAGE_OUTPUT_DIR), ts, idx)
                 filename = Path(img_path).name
                 # 构建前端可访问的 URL，例如 /static/screenshots/{filename}
-                img_url = f"{IMAGE_BASE_URL.rstrip('/')}/{filename}"
+                local_img_url = f"{IMAGE_BASE_URL.rstrip('/')}/{filename}"
+                img_url = self._upload_screenshot(
+                    img_path=Path(img_path),
+                    filename=filename,
+                    task_id=task_id,
+                ) or local_img_url
                 markdown = markdown.replace(marker, f"![]({img_url})", 1)
             except Exception as exc:
                 logger.error(f"生成截图失败 (timestamp={ts})：{exc}")
                 # self._handle_exception(task_id, exc)
                 return None
         return markdown
+
+    @staticmethod
+    def _image_bed_key(task_id: Optional[str], filename: str, now: Optional[datetime] = None) -> str:
+        """Build the stable image-bed key without probing object existence."""
+
+        config = storage_config_manager.get_effective_feature("image_bed")
+        path_prefix = str(config.get("path_prefix") or "").strip("/")
+        safe_task_id = str(task_id or "unknown-task").strip("/")
+        safe_filename = Path(filename).name
+        month = (now or datetime.now(timezone.utc)).strftime("%Y-%m")
+        parts = [part for part in (path_prefix, month, safe_task_id, safe_filename) if part]
+        return "/".join(parts)
+
+    def _upload_screenshot(
+        self,
+        img_path: Path,
+        filename: str,
+        task_id: Optional[str],
+    ) -> Optional[str]:
+        config = storage_config_manager.get_effective_feature("image_bed")
+        if not config.get("enabled"):
+            return None
+
+        source = str(config.get("source") or "")
+        public_base_url = str(config.get("public_base_url") or "").rstrip("/")
+        key = self._image_bed_key(task_id, filename)
+        content_type = IMAGE_CONTENT_TYPES.get(img_path.suffix.lower(), "application/octet-stream")
+        try:
+            object_storage.put_file(source, key, img_path, content_type)
+            logger.info("截图已上传图床 source=%s key=%s", source, key)
+            if not public_base_url:
+                logger.warning("图床已启用但 public_base_url 为空，截图回退本地 URL key=%s", key)
+                return None
+            return f"{public_base_url}/{key}"
+        except ObjectStorageError as exc:
+            logger.warning("图床截图上传失败，回退本地 URL source=%s key=%s: %s", source, key, exc)
+            return None
+        except Exception as exc:
+            logger.warning("图床截图上传失败，回退本地 URL source=%s key=%s: %s", source, key, exc)
+            return None
 
     @staticmethod
     def _extract_screenshot_timestamps(markdown: str) -> List[Tuple[str, int]]:

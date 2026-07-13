@@ -26,3 +26,8 @@
 - fork 现有 `v2.4.5` tag 仍指向 `bc487c6`，且对应 GitHub Release 包含扩展与桌面端资产；本次不删除、不改写旧 tag/Release。
 - 修复后的 fork `master` 提交为 `91a7c68`；下一步在该提交上创建 annotated `v2.4.5e` 并只推送到 `origin`。
 - 未向 `upstream` 创建 PR 或推送。
+
+## v2.5.0-ex 运行环境发现
+
+- 2026-07-13：提供的 MinIO 受限 key 对 `img/_probe/*` 返回 `AccessDenied`，但对配置的 `img/bilinote/*` 前缀可 PUT/DELETE；T1 连接探针因此落在图床 `path_prefix` 下，并完成 PUT → GET → 匿名 GET → DELETE。未操作授权范围外的桶。
+- 2026-07-13：T5 设置页浏览器 smoke 在既有 `BackendInitDialog.tsx` 的 Radix `DialogContent` 发现 `Missing Description or aria-describedby` warning（两条），不影响页面渲染；该文件不属于本批次，未扩 scope 修复。

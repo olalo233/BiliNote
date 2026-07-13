@@ -63,6 +63,7 @@ export interface Task {
     quality: string
     model_name: string
     provider_id: string
+    archive_video?: boolean
   }
 }
 

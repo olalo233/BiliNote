@@ -14,6 +14,7 @@ export const generateNote = async (data: {
   video_understand?: boolean
   video_interval?: number
   grid_size: Array<number>
+  archive_video?: boolean
 }) => {
   try {
     console.log('generateNote', data)

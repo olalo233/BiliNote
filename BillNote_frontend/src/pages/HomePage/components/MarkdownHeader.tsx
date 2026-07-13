@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Copy, Download, BrainCircuit, MessageSquare } from 'lucide-react'
+import { Archive, Copy, Download, BrainCircuit, MessageSquare } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -30,6 +30,9 @@ interface NoteHeaderProps {
   setShowTranscribe: (show: boolean) => void
   showChat?: false | 'half' | 'full'
   setShowChat?: (mode: false | 'half' | 'full') => void
+  viewMode: 'map' | 'preview'
+  setViewMode: (mode: 'map' | 'preview') => void
+  onResourcePack?: () => void
 }
 
 export function MarkdownHeader({
@@ -49,6 +52,7 @@ export function MarkdownHeader({
   setShowChat,
   viewMode,
   setViewMode,
+  onResourcePack,
 }: NoteHeaderProps) {
   const [copied, setCopied] = useState(false)
 
@@ -146,6 +150,19 @@ export function MarkdownHeader({
             <TooltipContent>思维导图</TooltipContent>
           </Tooltip>
         </TooltipProvider>
+        {onResourcePack && (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button onClick={onResourcePack} variant="ghost" size="sm" className="h-8 px-2">
+                  <Archive className="mr-1.5 h-4 w-4" />
+                  <span className="text-sm">资源包</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>查看该视频的资源包</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>

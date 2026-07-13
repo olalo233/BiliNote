@@ -15,6 +15,7 @@ import { z } from 'zod'
 import { Info, Loader2, Plus } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert.tsx'
 import { generateNote } from '@/services/note.ts'
+import { getStorageConfig } from '@/services/storage.ts'
 import { uploadFile } from '@/services/upload.ts'
 import { useTaskStore } from '@/store/taskStore'
 import { useModelStore } from '@/store/modelStore'
@@ -59,6 +60,7 @@ const formSchema = z
       .tuple([z.coerce.number().min(1).max(10), z.coerce.number().min(1).max(10)])
       .default([2, 2])
       .optional(),
+    archive_video: z.boolean().default(false),
   })
   .superRefine(({ video_url, platform }, ctx) => {
     if (platform === 'local') {
@@ -132,6 +134,7 @@ const NoteForm = () => {
   const navigate = useNavigate();
   const [isUploading, setIsUploading] = useState(false)
   const [uploadSuccess, setUploadSuccess] = useState(false)
+  const [assetsEnabled, setAssetsEnabled] = useState(false)
   /* ---- 全局状态 ---- */
   const { addPendingTask, currentTaskId, setCurrentTask, getCurrentTask, retryTask } =
     useTaskStore()
@@ -148,6 +151,7 @@ const NoteForm = () => {
       video_interval: 6,
       grid_size: [2, 2],
       format: [],
+      archive_video: false,
     },
   })
   const currentTask = getCurrentTask()
@@ -165,6 +169,19 @@ const NoteForm = () => {
     loadEnabledModels()
 
     return
+  }, [])
+  useEffect(() => {
+    let cancelled = false
+    getStorageConfig()
+      .then(config => {
+        if (!cancelled) setAssetsEnabled(config.assets.enabled)
+      })
+      .catch(() => {
+        if (!cancelled) setAssetsEnabled(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
   useEffect(() => {
     if (!currentTask) return
@@ -185,6 +202,7 @@ const NoteForm = () => {
       video_interval: formData.video_interval ?? 6,
       grid_size: formData.grid_size ?? [2, 2],
       format: formData.format ?? [],
+      archive_video: formData.archive_video ?? false,
     })
   }, [
     // 当下面任意一个变了，就重新 reset
@@ -557,6 +575,35 @@ const NoteForm = () => {
               </FormItem>
             )}
           />
+
+          {/* 备注 */}
+          {assetsEnabled && (
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+              <SectionHeader title="归档" tip="字幕与转写会在笔记成功后自动归档到资产桶" />
+              <div className="flex flex-col gap-3 text-sm">
+                <div className="flex items-center gap-2 text-slate-600">
+                  <Checkbox checked disabled />
+                  <span>字幕与转写自动归档（随资产功能启用）</span>
+                </div>
+                <FormField
+                  control={form.control}
+                  name="archive_video"
+                  render={({ field }) => (
+                    <FormItem>
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          checked={field.value}
+                          onCheckedChange={value => field.onChange(value === true)}
+                        />
+                        <FormLabel>归档原始视频</FormLabel>
+                      </div>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            </div>
+          )}
 
           {/* 备注 */}
           <FormField

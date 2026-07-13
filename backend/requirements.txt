@@ -57,6 +57,7 @@ macholib==1.16.3
 Markdown==3.8
 markdown-it-py==3.0.0
 markdown_pdf==1.7
+minio==7.2.15
 MarkupSafe==3.0.2
 mdurl==0.1.2
 modelscope==1.25.0

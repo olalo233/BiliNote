@@ -19,11 +19,13 @@ import 'katex/dist/katex.min.css'
 import 'github-markdown-css/github-markdown-light.css'
 import { ScrollArea } from '@/components/ui/scroll-area.tsx'
 import { useTaskStore } from '@/store/taskStore'
+import { getStorageConfig } from '@/services/storage'
 import { noteStyles } from '@/constant/note.ts'
 import { MarkdownHeader } from '@/pages/HomePage/components/MarkdownHeader.tsx'
 import TranscriptViewer from '@/pages/HomePage/components/transcriptViewer.tsx'
 import MarkmapEditor from '@/pages/HomePage/components/MarkmapComponent.tsx'
 import ChatPanel from '@/pages/HomePage/components/ChatPanel.tsx'
+import ResourcePackDialog from '@/pages/HomePage/components/ResourcePackDialog.tsx'
 import VideoBanner from '@/pages/HomePage/components/VideoBanner.tsx'
 import {
   Tooltip,
@@ -101,8 +103,7 @@ function createMarkdownComponents(baseURL: string) {
     ),
     a: ({ href, children, ...props }: any) => {
       const isOriginLink =
-        typeof children[0] === 'string' &&
-        (children[0] as string).startsWith('原片 @')
+        typeof children[0] === 'string' && (children[0] as string).startsWith('原片 @')
 
       if (isOriginLink) {
         const timeMatch = (children[0] as string).match(/原片 @ (\d{2}:\d{2})/)
@@ -137,8 +138,7 @@ function createMarkdownComponents(baseURL: string) {
           // LLM 生成的目录锚点可能和 heading 实际文本不完全一致
           //（例如 heading 带 *Content-[00:00]* 后缀，目录链接里没有）
           if (!target) {
-            const normalize = (s: string) =>
-              s.replace(/[-：:\s*\[\]]/g, '').toLowerCase()
+            const normalize = (s: string) => s.replace(/[-：:\s*\[\]]/g, '').toLowerCase()
             const search = normalize(id)
             const headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6')
             for (const h of headings) {
@@ -178,9 +178,7 @@ function createMarkdownComponents(baseURL: string) {
           {...props}
         >
           {children}
-          {href?.startsWith('http') && (
-            <ExternalLink className="ml-0.5 inline-block h-3 w-3" />
-          )}
+          {href?.startsWith('http') && <ExternalLink className="ml-0.5 inline-block h-3 w-3" />}
         </a>
       )
     },
@@ -213,9 +211,7 @@ function createMarkdownComponents(baseURL: string) {
       const isFakeHeading = /^(\*\*.+\*\*)$/.test(rawText.trim())
 
       if (isFakeHeading) {
-        return (
-          <div className="text-primary my-4 text-lg font-bold">{children}</div>
-        )
+        return <div className="text-primary my-4 text-lg font-bold">{children}</div>
       }
 
       return (
@@ -313,9 +309,7 @@ function createMarkdownComponents(baseURL: string) {
         {children}
       </td>
     ),
-    hr: ({ ...props }: any) => (
-      <hr className="border-muted-foreground/20 my-8" {...props} />
-    ),
+    hr: ({ ...props }: any) => <hr className="border-muted-foreground/20 my-8" {...props} />,
   }
 }
 
@@ -327,7 +321,9 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const [style, setStyle] = useState<string>('')
   const [createTime, setCreateTime] = useState<string>('')
   // 确保baseURL没有尾部斜杠
-  const baseURL = (String(import.meta.env.VITE_API_BASE_URL || '').replace('/api','') || '').replace(/\/$/, '')
+  const baseURL = (
+    String(import.meta.env.VITE_API_BASE_URL || '').replace('/api', '') || ''
+  ).replace(/\/$/, '')
   const getCurrentTask = useTaskStore.getState().getCurrentTask
   const currentTask = useTaskStore(state => state.getCurrentTask())
   const taskStatus = currentTask?.status || 'PENDING'
@@ -336,10 +332,26 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const [showTranscribe, setShowTranscribe] = useState(false)
   const [showChat, setShowChat] = useState<false | 'half' | 'full'>(false)
   const [viewMode, setViewMode] = useState<'map' | 'preview'>('preview')
+  const [assetsEnabled, setAssetsEnabled] = useState(false)
+  const [resourcePackOpen, setResourcePackOpen] = useState(false)
   const svgRef = useRef<SVGSVGElement>(null)
 
   // 缓存 ReactMarkdown components，仅在 baseURL 变化时重建
   const markdownComponents = useMemo(() => createMarkdownComponents(baseURL), [baseURL])
+
+  useEffect(() => {
+    let active = true
+    getStorageConfig()
+      .then(config => {
+        if (active) setAssetsEnabled(Boolean(config.assets?.enabled))
+      })
+      .catch(() => {
+        if (active) setAssetsEnabled(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
 
   // 多版本内容处理
   useEffect(() => {
@@ -496,7 +508,23 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
         setShowChat={setShowChat}
         viewMode={viewMode}
         setViewMode={setViewMode}
+        onResourcePack={
+          assetsEnabled && currentTask?.audioMeta?.video_id
+            ? () => setResourcePackOpen(true)
+            : undefined
+        }
       />
+
+      {currentTask?.audioMeta?.video_id && (
+        <ResourcePackDialog
+          open={resourcePackOpen}
+          onOpenChange={setResourcePackOpen}
+          platform={currentTask.audioMeta.platform || currentTask.formData.platform}
+          videoId={currentTask.audioMeta.video_id}
+          taskId={currentTask.id}
+          videoUrl={currentTask.formData.video_url}
+        />
+      )}
 
       {viewMode === 'map' ? (
         <div className="flex w-full flex-1 overflow-hidden bg-white">
@@ -518,36 +546,36 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
                   <ChatPanel taskId={currentTask.id} mode="full" onModeChange={setShowChat} />
                 </div>
               ) : (
-              <>
-              <ScrollArea className="min-w-0 flex-1">
-                <div className="px-2">
-                  <VideoBanner
-                    audioMeta={currentTask?.audioMeta}
-                    videoUrl={currentTask?.formData?.video_url}
-                  />
-                </div>
-                <div className={'markdown-body w-full px-2'}>
-                  <ReactMarkdown
-                    remarkPlugins={remarkPlugins}
-                    rehypePlugins={rehypePlugins}
-                    components={markdownComponents}
-                  >
-                    {selectedContent.replace(/^>\s*来源链接：[^\n]*\n*/m, '')}
-                  </ReactMarkdown>
-                </div>
-              </ScrollArea>
-              {showTranscribe && (
-                <div className={'ml-2 w-2/4'}>
-                  <TranscriptViewer />
-                </div>
-              )}
-              {/* 侧边问答模式：markdown + ChatPanel 各占一半 */}
-              {showChat === 'half' && currentTask && (
-                <div className="ml-2 h-full w-1/2 shrink-0">
-                  <ChatPanel taskId={currentTask.id} mode="half" onModeChange={setShowChat} />
-                </div>
-              )}
-              </>
+                <>
+                  <ScrollArea className="min-w-0 flex-1">
+                    <div className="px-2">
+                      <VideoBanner
+                        audioMeta={currentTask?.audioMeta}
+                        videoUrl={currentTask?.formData?.video_url}
+                      />
+                    </div>
+                    <div className={'markdown-body w-full px-2'}>
+                      <ReactMarkdown
+                        remarkPlugins={remarkPlugins}
+                        rehypePlugins={rehypePlugins}
+                        components={markdownComponents}
+                      >
+                        {selectedContent.replace(/^>\s*来源链接：[^\n]*\n*/m, '')}
+                      </ReactMarkdown>
+                    </div>
+                  </ScrollArea>
+                  {showTranscribe && (
+                    <div className={'ml-2 w-2/4'}>
+                      <TranscriptViewer />
+                    </div>
+                  )}
+                  {/* 侧边问答模式：markdown + ChatPanel 各占一半 */}
+                  {showChat === 'half' && currentTask && (
+                    <div className="ml-2 h-full w-1/2 shrink-0">
+                      <ChatPanel taskId={currentTask.id} mode="half" onModeChange={setShowChat} />
+                    </div>
+                  )}
+                </>
               )}
             </>
           ) : (
