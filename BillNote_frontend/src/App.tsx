@@ -29,6 +29,7 @@ const Monitor = lazy(() => import('@/pages/SettingPage/Monitor.tsx'))
 const Downloader = lazy(() => import('@/pages/SettingPage/Downloader.tsx'))
 const DownloaderForm = lazy(() => import('@/components/Form/DownloaderForm/Form.tsx'))
 const TranscriberPage = lazy(() => import('@/pages/SettingPage/transcriber.tsx'))
+const StorageFeature = lazy(() => import('@/pages/SettingPage/StorageFeature.tsx'))
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'))
 
 function App() {
@@ -83,6 +84,8 @@ function App() {
                 </Route>
                 <Route path="transcriber" element={<TranscriberPage />} />
                 <Route path="monitor" element={<Monitor />}></Route>
+                <Route path="image-bed" element={<StorageFeature feature="image_bed" />} />
+                <Route path="assets" element={<StorageFeature feature="assets" />} />
                 <Route path="about" element={<AboutPage />}></Route>
                 <Route path="*" element={<NotFoundPage />} />
               </Route>

@@ -4,6 +4,8 @@ import {
   HardDriveDownload,
   Info,
   Activity,
+  Image,
+  Archive,
 } from 'lucide-react'
 import MenuBar, { IMenuProps } from '@/pages/SettingPage/components/menuBar.tsx'
 
@@ -39,6 +41,18 @@ const Menu = () => {
       name: '部署监控',
       icon: <Activity />,
       path: '/settings/monitor',
+    },
+    {
+      id: 'image-bed',
+      name: '图床设置',
+      icon: <Image />,
+      path: '/settings/image-bed',
+    },
+    {
+      id: 'assets',
+      name: '资产设置',
+      icon: <Archive />,
+      path: '/settings/assets',
     },
     {
       id: 'about',

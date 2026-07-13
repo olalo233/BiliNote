@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import time
 from pathlib import Path
 from typing import Literal
 
@@ -28,6 +29,8 @@ from app.utils.response import ResponseWrapper as R
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+_USAGE_CACHE_TTL_SECONDS = 3600
+_usage_cache: dict[str, tuple[float, dict[str, object]]] = {}
 
 
 class StorageSourceRequest(BaseModel):
@@ -57,6 +60,10 @@ class ResourceArchiveRequest(BaseModel):
     archive_video: bool = False
 
 
+def _clear_usage_cache() -> None:
+    _usage_cache.clear()
+
+
 def _manager() -> StorageConfigManager:
     return storage_config_manager
 
@@ -72,6 +79,7 @@ def save_storage_source(data: StorageSourceRequest):
     name = source.pop("name")
     saved = _manager().upsert_source(name, source)
     saved["secret_key"] = _manager().get_public_config()["sources"][name]["secret_key"]
+    _clear_usage_cache()
     return R.success(data={"name": name, **saved})
 
 
@@ -90,6 +98,7 @@ def delete_storage_source(name: str):
         )
     if not _manager().delete_source(name):
         raise HTTPException(status_code=404, detail=f"source {name} 不存在")
+    _clear_usage_cache()
     return R.success(msg="存储源已删除")
 
 
@@ -100,6 +109,7 @@ def save_storage_feature(data: StorageFeatureRequest):
         values.pop("public_base_url", None)
         values.pop("path_prefix", None)
     feature = _manager().update_feature(data.feature, values)
+    _clear_usage_cache()
     return R.success(data={data.feature: feature})
 
 
@@ -171,6 +181,72 @@ def test_storage_source(name: str):
                 steps["delete"] = {"ok": False, "message": str(cleanup_exc), "cleanup": True}
         if probe_path:
             probe_path.unlink(missing_ok=True)
+
+
+def _usage_metric(objects: list[object_storage.ObjectInfo]) -> dict[str, object]:
+    latest = max(
+        (item.last_modified for item in objects if item.last_modified is not None),
+        default=None,
+    )
+    return {
+        "object_count": len(objects),
+        "total_size": sum(item.size for item in objects),
+        "latest_upload": latest.isoformat() if latest else None,
+    }
+
+
+@router.get("/storage/usage/{feature}")
+def get_storage_usage(feature: str, refresh: bool = False):
+    if feature not in ("image_bed", "assets"):
+        raise HTTPException(status_code=404, detail=f"不支持的存储功能: {feature}")
+    if not _manager().is_feature_enabled(feature):
+        return R.error(msg="存储功能未启用", code=400)
+
+    now = time.monotonic()
+    cached = _usage_cache.get(feature)
+    if cached and not refresh and now - cached[0] < _USAGE_CACHE_TTL_SECONDS:
+        return R.success(data=cached[1])
+
+    config = _manager().get_effective_feature(feature)
+    source = str(config.get("source") or "")
+    prefix = ""
+    if feature == "image_bed":
+        prefix = f"{str(config.get('path_prefix') or '').strip('/')}/"
+
+    try:
+        total = object_storage.list_prefix_stats(source, prefix)
+        data: dict[str, object] = {
+            "feature": feature,
+            "source": source,
+            "prefix": prefix,
+            "object_count": int(total.get("object_count", 0)),
+            "total_size": int(total.get("total_size", 0)),
+            "latest_upload": (
+                total["latest_upload"].isoformat()
+                if total.get("latest_upload") is not None
+                else None
+            ),
+        }
+        if feature == "assets":
+            objects = object_storage.list_objects(source, prefix)
+            groups: dict[str, list[object_storage.ObjectInfo]] = {
+                "video": [],
+                "audio": [],
+                "text": [],
+            }
+            for item in objects:
+                filename = Path(item.key).name
+                if filename == "video.mp4":
+                    groups["video"].append(item)
+                elif filename.startswith("audio."):
+                    groups["audio"].append(item)
+                elif filename == "transcript.json" or filename.startswith("subtitle."):
+                    groups["text"].append(item)
+            data["details"] = {name: _usage_metric(items) for name, items in groups.items()}
+        _usage_cache[feature] = (now, data)
+        return R.success(data=data)
+    except ObjectStorageError as exc:
+        return R.error(msg=str(exc), code=502)
 
 
 _ASSET_FILENAME_RE = re.compile(

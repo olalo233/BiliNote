@@ -30,3 +30,4 @@
 ## v2.5.0-ex 运行环境发现
 
 - 2026-07-13：提供的 MinIO 受限 key 对 `img/_probe/*` 返回 `AccessDenied`，但对配置的 `img/bilinote/*` 前缀可 PUT/DELETE；T1 连接探针因此落在图床 `path_prefix` 下，并完成 PUT → GET → 匿名 GET → DELETE。未操作授权范围外的桶。
+- 2026-07-13：T5 设置页浏览器 smoke 在既有 `BackendInitDialog.tsx` 的 Radix `DialogContent` 发现 `Missing Description or aria-describedby` warning（两条），不影响页面渲染；该文件不属于本批次，未扩 scope 修复。
