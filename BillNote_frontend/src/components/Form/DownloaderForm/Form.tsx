@@ -64,7 +64,7 @@ const DownloaderForm = () => {
       })
       setHasCookie(true)
       toast.success('保存成功')
-    } catch (e) {
+    } catch {
       toast.error('保存失败')
     }
   }
@@ -77,7 +77,7 @@ const DownloaderForm = () => {
       form.reset({ cookie: '' })
       setHasCookie(false)
       toast.success('Cookie 已清除')
-    } catch (e) {
+    } catch {
       toast.error('清除 Cookie 失败')
     }
   }
