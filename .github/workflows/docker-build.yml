@@ -40,7 +40,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=true
 
       - name: Resolve app version
         id: app-version
@@ -51,6 +51,18 @@ jobs:
           else
             echo "version=" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Verify release image tags
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          IMAGE="${REGISTRY}/${GITHUB_REPOSITORY,,}"
+          grep -Fx "$IMAGE:$VERSION" <<< "$IMAGE_TAGS"
+          grep -Fx "$IMAGE:latest" <<< "$IMAGE_TAGS"
 
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v6
@@ -64,7 +76,7 @@ jobs:
             VITE_APP_VERSION=${{ steps.app-version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
 
       - name: Generate Usage Instructions
         run: |
@@ -86,3 +98,101 @@ jobs:
           echo ""
           echo "Access the application at: http://localhost"
           echo "=========================================="
+
+  smoke-test:
+    name: Smoke test published amd64 image
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      packages: read
+
+    steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run image smoke tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          IMAGE="${REGISTRY}/${GITHUB_REPOSITORY,,}"
+          IMAGE_REF="$IMAGE:$VERSION"
+          CONTAINER="bilinote-smoke"
+
+          cleanup() {
+            docker rm -f "$CONTAINER" "$CONTAINER-auto" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker pull "$IMAGE_REF"
+          docker run -d --name "$CONTAINER" --platform linux/amd64 -p 18080:80 "$IMAGE_REF"
+
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18080/api/sys_health >/tmp/sys-health.json; then
+              break
+            fi
+            if [ "$attempt" = 60 ]; then
+              docker logs "$CONTAINER"
+              exit 1
+            fi
+            sleep 2
+          done
+
+          HOME_HTML="$(curl -fsS http://127.0.0.1:18080/)"
+          SETTINGS_HTML="$(curl -fsS http://127.0.0.1:18080/settings/model)"
+          printf '%s' "$HOME_HTML" | grep -Eq 'src="/assets/[^" ]+\.js"'
+          printf '%s' "$SETTINGS_HTML" | grep -Eq 'src="/assets/[^" ]+\.js"'
+          ASSET_PATH="$(printf '%s' "$HOME_HTML" | sed -n 's/.*src="\([^" ]*\.js\)".*/\1/p' | head -n 1)"
+          test -n "$ASSET_PATH"
+          ASSET_TYPE="$(curl -fsS -o /tmp/bilinote-index.js -w '%{content_type}' "http://127.0.0.1:18080$ASSET_PATH")"
+          case "$ASSET_TYPE" in
+            application/javascript*|text/javascript*) ;;
+            *) echo "Unexpected JavaScript content type: $ASSET_TYPE"; exit 1 ;;
+          esac
+
+          curl -fsS http://127.0.0.1:18080/api/model_list >/tmp/model-list.json
+          curl -fsS http://127.0.0.1:18080/api/sys_health >/tmp/sys-health.json
+          docker exec "$CONTAINER" deno --version | grep -Eq '^deno [0-9]+\.'
+          test "$(docker exec "$CONTAINER" python -m yt_dlp --version)" = "2026.07.04"
+          ! docker exec "$CONTAINER" sh -c 'grep -Eq "Collecting yt-dlp|Downloading yt-dlp" /var/log/supervisor/backend.log'
+
+          curl -fsS -X POST http://127.0.0.1:18080/api/update_downloader_cookie \
+            -H 'content-type: application/json' \
+            -d '{"platform":"youtube","cookie":"aaaaaaaaaaaa"}'
+          curl -fsS http://127.0.0.1:18080/api/get_downloader_cookie/youtube | grep -F 'aaaaaaaaaaaa'
+          curl -fsS -X DELETE http://127.0.0.1:18080/api/delete_downloader_cookie/youtube
+          curl -fsS -X DELETE http://127.0.0.1:18080/api/delete_downloader_cookie/youtube
+          curl -fsS http://127.0.0.1:18080/api/get_downloader_cookie/youtube | grep -F '未找到Cookies'
+
+          docker run -d --name "$CONTAINER-auto" --platform linux/amd64 \
+            -p 18081:80 \
+            -e YTDLP_AUTO_UPDATE=1 \
+            -e PIP_INDEX_URL=http://127.0.0.1:1/simple \
+            "$IMAGE_REF"
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18081/api/sys_health >/dev/null; then
+              break
+            fi
+            if [ "$attempt" = 60 ]; then
+              docker logs "$CONTAINER-auto"
+              exit 1
+            fi
+            sleep 2
+          done
+          docker exec "$CONTAINER-auto" sh -c 'grep -F "[ytdlp-auto-update] 升级失败" /var/log/supervisor/backend.log'
+
+          if docker exec "$CONTAINER" python -m yt_dlp -F 'https://www.youtube.com/watch?v=YM0_8mOaKic' > /tmp/youtube-formats.txt 2>&1; then
+            grep -Eiq 'm4a|webm|audio' /tmp/youtube-formats.txt
+          else
+            echo '::warning::YouTube live format check was unavailable on this runner; run the same check on the NAS or another network-enabled Linux host.'
+          fi
+
+          if docker exec "$CONTAINER" python -m yt_dlp -F 'https://www.bilibili.com/video/BV1CNLQ6REGh' > /tmp/bilibili-formats.txt 2>&1; then
+            grep -Eiq 'audio|video|mp4|m4a' /tmp/bilibili-formats.txt
+          else
+            echo '::warning::Bilibili live format check was unavailable on this runner; run the same check on the NAS or another network-enabled Linux host.'
+          fi
