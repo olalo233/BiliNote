@@ -8,6 +8,9 @@ on:
 
 jobs:
   build:
+    # v*e tags are fork-only Docker releases; do not start desktop builds
+    # because Tauri requires a strict SemVer version.
+    if: ${{ github.event_name == 'workflow_dispatch' || !endsWith(github.ref_name, 'e') }}
     strategy:
       matrix:
         include:

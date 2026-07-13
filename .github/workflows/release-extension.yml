@@ -15,6 +15,9 @@ permissions:
 jobs:
   build:
     name: Build & attach to release
+    # Keep fork-only Docker release tags (for example v2.4.5e) out of the
+    # browser-extension release workflow.
+    if: ${{ !endsWith(github.ref_name, 'e') }}
     runs-on: ubuntu-latest
     defaults:
       run:
