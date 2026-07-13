@@ -71,7 +71,8 @@ class ApplyPatchTest(unittest.TestCase):
 
         def fake_download_json(url, video_id, **kwargs):
             # Avoid any network; the real playurl call would 412 without dm_*.
-            return {"data": {"ok": True}}
+            # yt-dlp 2026 checks the API response code before reading data.
+            return {"code": 0, "data": {"ok": True}}
 
         ie = BilibiliBaseIE(YoutubeDL({"quiet": True}))
         ie._sign_wbi = fake_sign_wbi
