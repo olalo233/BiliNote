@@ -123,11 +123,33 @@ jobs:
           IMAGE="${REGISTRY}/${GITHUB_REPOSITORY,,}"
           IMAGE_REF="$IMAGE:$VERSION"
           CONTAINER="bilinote-smoke"
+          DIAG_DIR="${RUNNER_TEMP:-/tmp}/bilinote-smoke"
+          mkdir -p "$DIAG_DIR"
 
           cleanup() {
             docker rm -f "$CONTAINER" "$CONTAINER-auto" >/dev/null 2>&1 || true
           }
-          trap cleanup EXIT
+          write_diagnostics() {
+            docker logs "$CONTAINER" > "$DIAG_DIR/default-container.log" 2>&1 || true
+            docker logs "$CONTAINER-auto" > "$DIAG_DIR/auto-update-container.log" 2>&1 || true
+            {
+              echo "### Docker smoke diagnostics"
+              echo "Image: $IMAGE_REF"
+              echo "Default container logs:"
+              sed -n '1,240p' "$DIAG_DIR/default-container.log"
+              echo "Auto-update container logs:"
+              sed -n '1,240p' "$DIAG_DIR/auto-update-container.log"
+            } >> "${GITHUB_STEP_SUMMARY:-$DIAG_DIR/summary.md}"
+          }
+          on_exit() {
+            status=$?
+            if [ "$status" -ne 0 ]; then
+              write_diagnostics
+            fi
+            cleanup
+            exit "$status"
+          }
+          trap on_exit EXIT
 
           docker pull "$IMAGE_REF"
           docker run -d --name "$CONTAINER" --platform linux/amd64 -p 18080:80 "$IMAGE_REF"
@@ -138,6 +160,7 @@ jobs:
             fi
             if [ "$attempt" = 60 ]; then
               docker logs "$CONTAINER"
+              echo '::error title=Default container health timeout::/api/sys_health did not become ready.'
               exit 1
             fi
             sleep 2
@@ -188,6 +211,7 @@ jobs:
             fi
             if [ "$attempt" = 60 ]; then
               docker logs "$CONTAINER-auto"
+              echo '::error title=Auto-update container health timeout::/api/sys_health did not become ready after the update attempt.'
               exit 1
             fi
             sleep 2
@@ -217,3 +241,11 @@ jobs:
           else
             echo '::warning::Bilibili live format check was unavailable on this runner; run the same check on the NAS or another network-enabled Linux host.'
           fi
+
+      - name: Upload smoke diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bilinote-smoke-diagnostics-${{ github.run_id }}
+          path: ${{ runner.temp }}/bilinote-smoke/
+          if-no-files-found: ignore
