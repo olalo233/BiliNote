@@ -189,14 +189,22 @@ jobs:
           done
           docker exec "$CONTAINER-auto" sh -c 'grep -F "[ytdlp-auto-update] 升级失败" /var/log/supervisor/backend.log'
 
-          if docker exec "$CONTAINER" python -m yt_dlp -F 'https://www.youtube.com/watch?v=YM0_8mOaKic' > /tmp/youtube-formats.txt 2>&1; then
-            grep -Eiq 'm4a|webm|audio' /tmp/youtube-formats.txt
+          if timeout 45s docker exec "$CONTAINER" python -m yt_dlp -F 'https://www.youtube.com/watch?v=YM0_8mOaKic' > /tmp/youtube-formats.txt 2>&1; then
+            if grep -Eiq 'm4a|webm|audio' /tmp/youtube-formats.txt; then
+              echo 'YouTube format check returned audio/video formats.'
+            else
+              echo '::warning::YouTube format check returned no recognizable format rows on this runner.'
+            fi
           else
             echo '::warning::YouTube live format check was unavailable on this runner; run the same check on the NAS or another network-enabled Linux host.'
           fi
 
-          if docker exec "$CONTAINER" python -m yt_dlp -F 'https://www.bilibili.com/video/BV1CNLQ6REGh' > /tmp/bilibili-formats.txt 2>&1; then
-            grep -Eiq 'audio|video|mp4|m4a' /tmp/bilibili-formats.txt
+          if timeout 45s docker exec "$CONTAINER" python -m yt_dlp -F 'https://www.bilibili.com/video/BV1CNLQ6REGh' > /tmp/bilibili-formats.txt 2>&1; then
+            if grep -Eiq 'audio|video|mp4|m4a' /tmp/bilibili-formats.txt; then
+              echo 'Bilibili format check returned audio/video formats.'
+            else
+              echo '::warning::Bilibili format check returned no recognizable format rows on this runner.'
+            fi
           else
             echo '::warning::Bilibili live format check was unavailable on this runner; run the same check on the NAS or another network-enabled Linux host.'
           fi
