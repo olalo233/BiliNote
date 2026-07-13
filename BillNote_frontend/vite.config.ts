@@ -31,7 +31,9 @@ export default defineConfig(({ mode }) => {
   const appVersion = env.VITE_APP_VERSION || process.env.VITE_APP_VERSION || readAppVersion()
 
   return {
-    base: './',
+    // Tauri loads the bundle through file:// and needs relative assets;
+    // the web/Docker build must use absolute paths so nested SPA routes can refresh.
+    base: process.env.DOCKER_BUILD ? '/' : './',
     define: {
       __APP_VERSION__: JSON.stringify(appVersion),
     },
