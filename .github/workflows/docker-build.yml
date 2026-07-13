@@ -157,14 +157,14 @@ jobs:
             | python -c 'import json, sys; payload=json.load(sys.stdin); assert payload.get("code") == 0, payload; data=payload.get("data"); assert isinstance(data, dict), payload; assert {"sources", "image_bed", "assets"}.issubset(data), data; assert data["sources"] == {}, data'
 
           # Unconfigured storage must not change the existing generation entry
-          # contract. An invalid but supported URL reaches the normal model/key
-          # validation path and must not be rejected as a storage error.
+          # contract. Stop at the existing request-schema validation boundary so
+          # CI does not download a video or require a Whisper model/API key.
           GENERATE_STATUS="$(curl -sS -o /tmp/generate-note-unconfigured.json -w '%{http_code}' \
             -X POST http://127.0.0.1:18080/api/generate_note \
             -H 'content-type: application/json' \
-            -d '{"video_url":"https://www.youtube.com/watch?v=BaW_avaa2Bc","platform":"youtube","quality":"medium","screenshot":true,"link":false,"model_name":"","provider_id":""}')"
-          test "$GENERATE_STATUS" != "500"
-          python -c 'import json; payload=json.load(open("/tmp/generate-note-unconfigured.json")); assert isinstance(payload, dict), payload; assert "code" in payload or "detail" in payload, payload'
+            -d '{"video_url":"https://www.youtube.com/watch?v=BaW_avaa2Bc","platform":"youtube","quality":"medium"}')"
+          test "$GENERATE_STATUS" = "422"
+          python -c 'import json; payload=json.load(open("/tmp/generate-note-unconfigured.json")); assert isinstance(payload.get("detail"), list), payload'
 
           docker exec "$CONTAINER" deno --version | grep -Eq '^deno [0-9]+\.'
           test "$(docker exec "$CONTAINER" python -m yt_dlp --version)" = "2026.07.04"
