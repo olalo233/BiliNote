@@ -2,6 +2,10 @@
 #   docker build --build-arg BASE_REGISTRY=docker.m.daocloud.io -f Dockerfile.complete .
 ARG BASE_REGISTRY=docker.io
 
+# yt-dlp 的 YouTube EJS/nsig 解密需要 JS 运行时；单独阶段拷贝官方二进制，
+# 避免在运行时镜像里通过 curl 执行不受锁定的安装脚本。
+FROM ${BASE_REGISTRY}/denoland/deno:bin AS deno-bin
+
 # === 阶段1：构建 Backend ===
 FROM ${BASE_REGISTRY}/library/python:3.11-slim AS backend-builder
 
@@ -74,6 +78,9 @@ RUN set -ex && \
     apt-get update && \
     apt-get install -y --no-install-recommends ffmpeg nginx supervisor procps && \
     rm -rf /var/lib/apt/lists/*
+
+# yt-dlp 从 PATH 自动发现 deno。
+COPY --from=deno-bin /deno /usr/local/bin/deno
 
 ENV PATH="/usr/bin:${PATH}"
 ENV HF_ENDPOINT=https://hf-mirror.com
