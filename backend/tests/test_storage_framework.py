@@ -1,0 +1,104 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from app.routers import storage as storage_router
+from app.services import object_storage
+from app.services.object_storage import ObjectStorageError
+from app.services.storage_config_manager import SECRET_MASK, StorageConfigManager
+
+
+def response_body(response):
+    return json.loads(response.body)
+
+
+def source_payload(secret_key="secret-1234"):
+    return {
+        "type": "s3",
+        "endpoint": "minio.example:9000",
+        "access_key": "access",
+        "secret_key": secret_key,
+        "bucket": "bucket",
+        "path_style": True,
+        "use_ssl": False,
+    }
+
+
+def test_storage_config_manager_masks_secret_and_reads_live_file(tmp_path):
+    manager = StorageConfigManager(str(tmp_path / "storage.json"))
+
+    assert manager.get_public_config() == {
+        "sources": {},
+        "image_bed": {
+            "enabled": False,
+            "source": "",
+            "public_base_url": "",
+            "path_prefix": "",
+        },
+        "assets": {"enabled": False, "source": ""},
+    }
+
+    manager.upsert_source("minio-img", source_payload())
+    manager.update_feature(
+        "image_bed",
+        {
+            "enabled": True,
+            "source": "minio-img",
+            "public_base_url": "http://minio.example/img",
+            "path_prefix": "bilinote",
+        },
+    )
+    public = manager.get_public_config()
+    assert public["sources"]["minio-img"]["secret_key"] == f"{SECRET_MASK}1234"
+    assert public["image_bed"]["enabled"] is True
+    assert "secret-1234" not in json.dumps(public)
+
+    # A masked update retains the raw secret in the file while public reads stay masked.
+    manager.upsert_source("minio-img", {**source_payload(""), "secret_key": f"{SECRET_MASK}1234"})
+    assert manager.get_source("minio-img")["secret_key"] == "secret-1234"
+
+
+def test_storage_config_manager_treats_dangling_feature_as_disabled(tmp_path, caplog):
+    manager = StorageConfigManager(str(tmp_path / "storage.json"))
+    manager.update_feature("assets", {"enabled": True, "source": "missing"})
+
+    with caplog.at_level("WARNING"):
+        assert manager.is_feature_enabled("assets") is False
+    assert "不存在的 source=missing" in caplog.text
+
+
+def test_object_storage_wraps_sdk_errors_with_source_and_key(monkeypatch, tmp_path):
+    manager = StorageConfigManager(str(tmp_path / "storage.json"))
+    manager.upsert_source("broken", source_payload())
+    monkeypatch.setattr(object_storage, "storage_config_manager", manager)
+
+    class BrokenClient:
+        def fput_object(self, *args, **kwargs):
+            raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(object_storage, "Minio", lambda *args, **kwargs: BrokenClient())
+    local_file = Path(tmp_path / "one.txt")
+    local_file.write_text("x")
+
+    with pytest.raises(ObjectStorageError, match=r"source=broken key=folder/one.txt"):
+        object_storage.put_file("broken", "folder/one.txt", local_file, "text/plain")
+
+
+def test_storage_source_routes_mask_and_retain_secret(monkeypatch, tmp_path):
+    manager = StorageConfigManager(str(tmp_path / "storage.json"))
+    monkeypatch.setattr(storage_router, "storage_config_manager", manager)
+
+    first = storage_router.save_storage_source(
+        storage_router.StorageSourceRequest(name="source", **source_payload())
+    )
+    assert response_body(first)["data"]["secret_key"] == f"{SECRET_MASK}1234"
+
+    second = storage_router.save_storage_source(
+        storage_router.StorageSourceRequest(
+            name="source",
+            **source_payload(f"{SECRET_MASK}1234"),
+        )
+    )
+    assert response_body(second)["data"]["secret_key"] == f"{SECRET_MASK}1234"
+    assert manager.get_source("source")["secret_key"] == "secret-1234"
