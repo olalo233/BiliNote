@@ -172,7 +172,11 @@ jobs:
             -p 18081:80 \
             -e YTDLP_AUTO_UPDATE=1 \
             -e PIP_INDEX_URL=http://127.0.0.1:1/simple \
-            "$IMAGE_REF"
+            -e PIP_RETRIES=0 \
+            -e PIP_DEFAULT_TIMEOUT=1 \
+            --entrypoint sh \
+            "$IMAGE_REF" \
+            -c 'pip uninstall -y yt-dlp >/dev/null 2>&1 || true; exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf'
           for attempt in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:18081/api/sys_health >/dev/null; then
               break
