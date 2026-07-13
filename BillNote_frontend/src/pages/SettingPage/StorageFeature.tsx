@@ -269,7 +269,12 @@ export default function StorageFeature({ feature }: StorageFeatureProps) {
     }
     setTesting(true)
     try {
-      setTestResult(await testStorageSource(featureForm.source))
+      setTestResult(
+        await testStorageSource(
+          featureForm.source,
+          feature === 'image_bed' ? featureForm.path_prefix : ''
+        )
+      )
     } catch {
       setTestResult(null)
       toast.error('连接测试失败')
