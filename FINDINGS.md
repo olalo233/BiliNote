@@ -31,3 +31,4 @@
 
 - 2026-07-13：提供的 MinIO 受限 key 对 `img/_probe/*` 返回 `AccessDenied`，但对配置的 `img/bilinote/*` 前缀可 PUT/DELETE；T1 连接探针因此落在图床 `path_prefix` 下，并完成 PUT → GET → 匿名 GET → DELETE。未操作授权范围外的桶。
 - 2026-07-13：T5 设置页浏览器 smoke 在既有 `BackendInitDialog.tsx` 的 Radix `DialogContent` 发现 `Missing Description or aria-describedby` warning（两条），不影响页面渲染；该文件不属于本批次，未扩 scope 修复。
+- 2026-07-14：发布镜像的 supervisor 内置 `TRANSCRIBER_TYPE=fast-whisper` 会覆盖临时 `docker run -e TRANSCRIBER_TYPE=...`；本地验收使用持久化 `config/transcriber.json` 选择 `bcut`，未修改 supervisor 或新增环境变量；NAS 部署应按配置文件方式设置转写器。
