@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import tempfile
 import uuid
+import json
+import logging
+import os
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -12,12 +16,18 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.services import object_storage
+from app.services.asset_archive import enqueue_archive
 from app.services.object_storage import ObjectStorageError
 from app.services.storage_config_manager import StorageConfigManager, storage_config_manager
+from app.db.video_task_dao import get_task_by_video, get_tasks_by_video
+from app.models.audio_model import AudioDownloadResult
+from app.models.notes_model import NoteResult
+from app.models.transcriber_model import TranscriptResult, TranscriptSegment
 from app.utils.response import ResponseWrapper as R
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class StorageSourceRequest(BaseModel):
@@ -37,6 +47,14 @@ class StorageFeatureRequest(BaseModel):
     source: str = ""
     public_base_url: str = ""
     path_prefix: str = ""
+
+
+class ResourceArchiveRequest(BaseModel):
+    platform: str
+    video_id: str
+    task_id: str | None = None
+    video_url: str = ""
+    archive_video: bool = False
 
 
 def _manager() -> StorageConfigManager:
@@ -153,3 +171,201 @@ def test_storage_source(name: str):
                 steps["delete"] = {"ok": False, "message": str(cleanup_exc), "cleanup": True}
         if probe_path:
             probe_path.unlink(missing_ok=True)
+
+
+_ASSET_FILENAME_RE = re.compile(
+    r"^(?:video\.mp4|audio\.[A-Za-z0-9]+|transcript\.json|subtitle\.[^/]+\.json)$"
+)
+
+
+def _validate_asset_key(key: str) -> str:
+    normalized = str(key or "").strip("/")
+    parts = normalized.split("/")
+    if len(parts) != 3 or any(not part or part in {".", ".."} for part in parts):
+        raise HTTPException(status_code=400, detail="非法资产 key")
+    if ".." in normalized or not _ASSET_FILENAME_RE.fullmatch(parts[-1]):
+        raise HTTPException(status_code=400, detail="非法资产 key")
+    configured_buckets = {
+        str(source.get("bucket") or "").strip("/")
+        for source in _manager().get_config().get("sources", {}).values()
+        if source.get("bucket")
+    }
+    if parts[0] in configured_buckets:
+        raise HTTPException(status_code=400, detail="资产 key 不得携带桶名")
+    return normalized
+
+
+def _local_task_assets(task_ids: list[str]) -> dict[str, object]:
+    note_output_dir = Path(os.getenv("NOTE_OUTPUT_DIR", "note_results"))
+    local = {"video": False, "audio": False, "subtitle": False, "transcript": False}
+    for task_id in task_ids:
+        transcript_path = note_output_dir / f"{task_id}_transcript.json"
+        local["transcript"] = local["transcript"] or transcript_path.exists()
+        if transcript_path.exists():
+            try:
+                transcript = json.loads(transcript_path.read_text(encoding="utf-8"))
+                local["subtitle"] = local["subtitle"] or bool(transcript.get("raw"))
+            except (OSError, json.JSONDecodeError):
+                pass
+        audio_meta_path = note_output_dir / f"{task_id}_audio.json"
+        if not audio_meta_path.exists():
+            continue
+        try:
+            audio_meta = json.loads(audio_meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        audio_path = Path(audio_meta.get("file_path") or "")
+        video_path = Path(audio_meta.get("video_path") or "")
+        local["audio"] = local["audio"] or audio_path.is_file()
+        local["video"] = local["video"] or video_path.is_file()
+    return local
+
+
+def _resource_items(platform: str, video_id: str) -> list[dict[str, object]]:
+    task_rows = get_tasks_by_video(video_id, platform)
+    task_ids = [row["task_id"] for row in task_rows]
+    local = _local_task_assets(task_ids)
+    archived: dict[str, list[object_storage.ObjectInfo]] = {
+        "video": [],
+        "audio": [],
+        "subtitle": [],
+        "transcript": [],
+    }
+
+    asset_config = _manager().get_effective_feature("assets")
+    if asset_config.get("enabled"):
+        source = str(asset_config.get("source") or "")
+        try:
+            for item in object_storage.list_objects(source, f"{platform}/{video_id}/"):
+                filename = Path(item.key).name
+                if filename == "video.mp4":
+                    archived["video"].append(item)
+                elif filename.startswith("audio."):
+                    archived["audio"].append(item)
+                elif filename.startswith("subtitle."):
+                    archived["subtitle"].append(item)
+                elif filename == "transcript.json":
+                    archived["transcript"].append(item)
+        except ObjectStorageError as exc:
+            logger.warning("资源包列举资产失败 platform=%s video_id=%s: %s", platform, video_id, exc)
+
+    items = []
+    labels = ("video", "audio", "subtitle", "transcript")
+    for kind in labels:
+        objects = archived[kind]
+        items.append(
+            {
+                "kind": kind,
+                "archived": bool(objects),
+                "local": bool(local[kind]),
+                "size": sum(item.size for item in objects),
+                "key": objects[0].key if objects else None,
+                "count": len(objects) if kind == "subtitle" else (1 if objects else 0),
+            }
+        )
+
+    image_count = 0
+    image_size = 0
+    image_keys: list[str] = []
+    image_config = _manager().get_effective_feature("image_bed")
+    if image_config.get("enabled") and task_ids:
+        try:
+            image_source = str(image_config.get("source") or "")
+            image_prefix = f"{str(image_config.get('path_prefix') or '').strip('/')}/"
+            for item in object_storage.list_objects(image_source, image_prefix):
+                if any(f"/{task_id}/" in f"/{item.key}" for task_id in task_ids):
+                    image_count += 1
+                    image_size += item.size
+                    image_keys.append(item.key)
+        except ObjectStorageError as exc:
+            logger.warning("资源包列举图床图片失败 platform=%s video_id=%s: %s", platform, video_id, exc)
+    items.append(
+        {
+            "kind": "images",
+            "archived": image_count > 0,
+            "local": bool(task_ids and any(Path("static/screenshots").glob("*"))),
+            "size": image_size,
+            "count": image_count,
+            "keys": image_keys,
+        }
+    )
+    return items
+
+
+@router.get("/resource_pack/{platform}/{video_id}")
+def get_resource_pack(platform: str, video_id: str):
+    return R.success(
+        data={
+            "platform": platform,
+            "video_id": video_id,
+            "items": _resource_items(platform, video_id),
+        }
+    )
+
+
+@router.get("/resource_pack/presign")
+def presign_resource(key: str):
+    try:
+        normalized = _validate_asset_key(key)
+        source = _manager().get_effective_feature("assets").get("source")
+        if not _manager().is_feature_enabled("assets"):
+            return R.error(msg="资产功能未启用", code=400)
+        url = object_storage.get_presigned_url(str(source), normalized, 3600)
+        return R.success(data={"key": normalized, "url": url, "expires_in": 3600})
+    except HTTPException:
+        raise
+    except ObjectStorageError as exc:
+        return R.error(msg=str(exc), code=404)
+
+
+@router.delete("/resource_pack/object")
+def delete_resource_object(key: str):
+    try:
+        normalized = _validate_asset_key(key)
+        config = _manager().get_effective_feature("assets")
+        if not config.get("enabled"):
+            return R.error(msg="资产功能未启用", code=400)
+        object_storage.delete_object(str(config["source"]), normalized)
+        return R.success(data={"key": normalized}, msg="资产副本已删除")
+    except HTTPException:
+        raise
+    except ObjectStorageError as exc:
+        return R.error(msg=str(exc), code=404)
+
+
+@router.post("/resource_pack/archive")
+def archive_resource(data: ResourceArchiveRequest):
+    if not _manager().is_feature_enabled("assets"):
+        return R.error(msg="资产功能未启用", code=400)
+    task_id = data.task_id or get_task_by_video(data.video_id, data.platform)
+    if not task_id:
+        raise HTTPException(status_code=404, detail="未找到该视频的笔记任务")
+    result_path = Path(os.getenv("NOTE_OUTPUT_DIR", "note_results")) / f"{task_id}.json"
+    if not result_path.exists():
+        raise HTTPException(status_code=404, detail="笔记结果不存在")
+    try:
+        raw = json.loads(result_path.read_text(encoding="utf-8"))
+        transcript_raw = raw["transcript"]
+        transcript = TranscriptResult(
+            language=transcript_raw.get("language"),
+            full_text=transcript_raw["full_text"],
+            segments=[TranscriptSegment(**segment) for segment in transcript_raw.get("segments", [])],
+            raw=transcript_raw.get("raw"),
+        )
+        note = NoteResult(
+            markdown=raw["markdown"],
+            transcript=transcript,
+            audio_meta=AudioDownloadResult(**raw["audio_meta"]),
+        )
+        enqueue_archive(
+            task_id=task_id,
+            platform=data.platform,
+            video_url=data.video_url,
+            note=note,
+            transcript_cache_file=Path(os.getenv("NOTE_OUTPUT_DIR", "note_results"))
+            / f"{task_id}_transcript.json",
+            archive_video=data.archive_video,
+        )
+        return R.success(data={"task_id": task_id, "queued": True})
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"笔记结果格式无效: {exc}") from exc

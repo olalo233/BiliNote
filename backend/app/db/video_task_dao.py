@@ -42,6 +42,25 @@ def get_task_by_video(video_id: str, platform: str):
         db.close()
 
 
+def get_tasks_by_video(video_id: str, platform: str) -> list[dict[str, str]]:
+    """Return all task ids for a video, newest first, for asset aggregation."""
+
+    db = next(get_db())
+    try:
+        tasks = (
+            db.query(VideoTask)
+            .filter_by(video_id=video_id, platform=platform)
+            .order_by(VideoTask.created_at.desc())
+            .all()
+        )
+        return [{"task_id": task.task_id, "video_id": task.video_id, "platform": task.platform} for task in tasks]
+    except Exception as exc:
+        logger.error(f"Failed to list tasks by video: {exc}")
+        return []
+    finally:
+        db.close()
+
+
 # 删除任务
 def delete_task_by_video(video_id: str, platform: str):
     db = next(get_db())
