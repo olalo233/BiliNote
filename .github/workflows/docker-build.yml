@@ -159,7 +159,11 @@ jobs:
           curl -fsS http://127.0.0.1:18080/api/sys_health >/tmp/sys-health.json
           docker exec "$CONTAINER" deno --version | grep -Eq '^deno [0-9]+\.'
           test "$(docker exec "$CONTAINER" python -m yt_dlp --version)" = "2026.07.04"
-          ! docker exec "$CONTAINER" sh -c 'grep -Eq "Collecting yt-dlp|Downloading yt-dlp" /var/log/supervisor/backend.log'
+          if docker exec "$CONTAINER" sh -c 'grep -Eq "Collecting yt-dlp|Downloading yt-dlp" /var/log/supervisor/backend.log'; then
+            docker logs "$CONTAINER" || true
+            echo '::error title=Unexpected default auto-update::default container attempted a yt-dlp update.'
+            exit 1
+          fi
 
           curl -fsS -X POST http://127.0.0.1:18080/api/update_downloader_cookie \
             -H 'content-type: application/json' \
