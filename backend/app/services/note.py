@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 from dataclasses import asdict
 from pathlib import Path
 from typing import List, Optional, Tuple, Union, Any
@@ -58,6 +59,11 @@ IMAGE_BASE_URL = os.getenv("IMAGE_BASE_URL", "/static/screenshots")
 # 日志配置
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _clean_error_message(message: str) -> str:
+    return ANSI_ESCAPE_RE.sub("", message)
 
 
 class NoteGenerator:
@@ -267,7 +273,7 @@ class NoteGenerator:
 
         except Exception as exc:
             logger.error(f"生成笔记流程异常 (task_id={task_id})：{exc}", exc_info=True)
-            self._update_status(task_id, TaskStatus.FAILED, message=str(exc))
+            self._update_status(task_id, TaskStatus.FAILED, message=_clean_error_message(str(exc)))
             return None
 
     @staticmethod
@@ -386,7 +392,7 @@ class NoteGenerator:
                 error_message = json.dumps(error_message, ensure_ascii=False)
             except:
                 error_message = str(error_message)
-        self._update_status(task_id, TaskStatus.FAILED, message=error_message)
+        self._update_status(task_id, TaskStatus.FAILED, message=_clean_error_message(str(error_message)))
 
     def _download_media(
         self,

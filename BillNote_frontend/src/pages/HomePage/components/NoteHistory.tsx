@@ -123,6 +123,20 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId }) => {
                       <p>{task.audioMeta.title || '未命名笔记'}</p>
                     </TooltipContent>
                   </Tooltip>
+                  {task.status === 'FAILED' && task.error && (
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <p className="mt-1 line-clamp-1 max-w-[180px] text-xs text-red-500">
+                            {task.error}
+                          </p>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-sm">
+                          <p>{task.error}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  )}
                 </TooltipProvider>
               </div>
             </div>
