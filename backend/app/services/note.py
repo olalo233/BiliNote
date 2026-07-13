@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 from dataclasses import asdict
 from pathlib import Path
 from typing import List, Optional, Tuple, Union, Any
@@ -36,6 +37,7 @@ from app.utils.screenshot_marker import extract_screenshot_timestamps
 from app.utils.status_code import StatusCode
 from app.utils.video_helper import generate_screenshot
 from app.utils.video_reader import VideoReader
+from app.utils.url_parser import extract_video_id
 
 # ------------------ 环境变量与全局配置 ------------------
 
@@ -57,6 +59,11 @@ IMAGE_BASE_URL = os.getenv("IMAGE_BASE_URL", "/static/screenshots")
 # 日志配置
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _clean_error_message(message: str) -> str:
+    return ANSI_ESCAPE_RE.sub("", message)
 
 
 class NoteGenerator:
@@ -173,20 +180,47 @@ class NoteGenerator:
             # 有字幕时只提取元信息，不下载音视频文件（除非需要截图/视频理解）
             has_transcript = transcript is not None
             need_full_download = not has_transcript or screenshot or video_understanding
-            audio_meta = self._download_media(
-                downloader=downloader,
-                video_url=video_url,
-                quality=quality,
-                audio_cache_file=audio_cache_file,
-                status_phase=TaskStatus.DOWNLOADING,
-                platform=platform,
-                output_path=output_path,
-                screenshot=screenshot,
-                video_understanding=video_understanding,
-                video_interval=video_interval,
-                grid_size=grid_size,
-                skip_download=not need_full_download,
-            )
+            media_degraded = False
+            try:
+                audio_meta = self._download_media(
+                    downloader=downloader,
+                    video_url=video_url,
+                    quality=quality,
+                    audio_cache_file=audio_cache_file,
+                    status_phase=TaskStatus.DOWNLOADING,
+                    platform=platform,
+                    output_path=output_path,
+                    screenshot=screenshot,
+                    video_understanding=video_understanding,
+                    video_interval=video_interval,
+                    grid_size=grid_size,
+                    skip_download=not need_full_download,
+                )
+            except Exception as exc:
+                if not has_transcript:
+                    raise
+
+                media_degraded = True
+                video_id = extract_video_id(str(video_url), platform) or str(video_url)
+                audio_meta = AudioDownloadResult(
+                    file_path="",
+                    title=video_id,
+                    duration=0,
+                    cover_url=None,
+                    platform=platform,
+                    video_id=video_id,
+                    raw_info={"tags": []},
+                    video_path=None,
+                )
+                self.video_path = None
+                self.video_img_urls = []
+                logger.warning(
+                    "媒体下载失败，已有字幕任务降级为纯文字笔记（%s）：%s",
+                    "本次笔记不含截图/视频理解"
+                    if screenshot or video_understanding
+                    else "不含媒体信息",
+                    exc,
+                )
 
             # 3. 如果前面没拿到字幕，走转写流程
             if transcript is None:
@@ -200,25 +234,28 @@ class NoteGenerator:
                 )
 
             # 3. GPT 总结
+            effective_formats = [
+                item for item in (_format or []) if not (media_degraded and item == "screenshot")
+            ]
             markdown = self._summarize_text(
                 audio_meta=audio_meta,
                 transcript=transcript,
                 gpt=gpt,
                 markdown_cache_file=markdown_cache_file,
                 link=link,
-                screenshot=screenshot,
-                formats=_format or [],
+                screenshot=screenshot and not media_degraded,
+                formats=effective_formats,
                 style=style,
                 extras=extras,
                 video_img_urls=self.video_img_urls,
             )
 
             # 4. 截图 & 链接替换
-            if _format:
+            if effective_formats:
                 markdown = self._post_process_markdown(
                     markdown=markdown,
                     video_path=self.video_path,
-                    formats=_format,
+                    formats=effective_formats,
                     audio_meta=audio_meta,
                     platform=platform,
                 )
@@ -236,7 +273,7 @@ class NoteGenerator:
 
         except Exception as exc:
             logger.error(f"生成笔记流程异常 (task_id={task_id})：{exc}", exc_info=True)
-            self._update_status(task_id, TaskStatus.FAILED, message=str(exc))
+            self._update_status(task_id, TaskStatus.FAILED, message=_clean_error_message(str(exc)))
             return None
 
     @staticmethod
@@ -355,7 +392,7 @@ class NoteGenerator:
                 error_message = json.dumps(error_message, ensure_ascii=False)
             except:
                 error_message = str(error_message)
-        self._update_status(task_id, TaskStatus.FAILED, message=error_message)
+        self._update_status(task_id, TaskStatus.FAILED, message=_clean_error_message(str(error_message)))
 
     def _download_media(
         self,

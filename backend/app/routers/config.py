@@ -43,6 +43,12 @@ def update_cookie(data: CookieUpdateRequest):
 
     )
 
+
+@router.delete("/delete_downloader_cookie/{platform}")
+def delete_cookie(platform: str):
+    cookie_manager.delete(platform)
+    return R.success(msg="Cookie 已删除")
+
 class TranscriberConfigRequest(BaseModel):
     transcriber_type: str
     whisper_model_size: Optional[str] = None

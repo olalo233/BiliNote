@@ -15,6 +15,7 @@ services:
     environment:
       - BACKEND_PORT=${BACKEND_PORT}
       - BACKEND_HOST=${BACKEND_HOST}
+      # YTDLP_AUTO_UPDATE=1 可在容器启动时从 PyPI 更新 yt-dlp，默认关闭。
     volumes:
       # 把整个 backend/ 目录绑到 /app，意味着这些都持久化到宿主机、删容器不丢：
       #   ./backend/bili_note.db                — SQLite 数据库（含 LLM 供应商配置、笔记历史）

@@ -6,8 +6,6 @@ import toast from 'react-hot-toast'
 export const useTaskPolling = (interval = 3000) => {
   const tasks = useTaskStore(state => state.tasks)
   const updateTaskContent = useTaskStore(state => state.updateTaskContent)
-  const updateTaskStatus = useTaskStore(state => state.updateTaskStatus)
-  const removeTask = useTaskStore(state => state.removeTask)
 
   const tasksRef = useRef(tasks)
 
@@ -41,15 +39,26 @@ export const useTaskPolling = (interval = 3000) => {
                 audioMeta: audio_meta,
               })
             } else if (status === 'FAILED') {
-              updateTaskContent(task.id, { status })
-              console.warn(`⚠️ 任务 ${task.id} 失败`)
+              const message = String(res.message || '任务失败')
+              updateTaskContent(task.id, {
+                status,
+                error: message,
+              })
+              toast.error(`笔记生成失败：${message.slice(0, 200)}`)
+              console.warn(`⚠️ 任务 ${task.id} 失败：${message}`)
             } else {
               updateTaskContent(task.id, { status })
             }
           }
-        } catch (e) {
+        } catch (e: unknown) {
           console.error('❌ 任务轮询失败：', e)
-          updateTaskContent(task.id, { status: 'FAILED' })
+          const error = e as { msg?: unknown; message?: unknown }
+          const message = String(error.msg || error.message || '任务轮询失败')
+          updateTaskContent(task.id, {
+            status: 'FAILED',
+            error: message,
+          })
+          toast.error(`笔记生成失败：${message.slice(0, 200)}`)
         }
       }
     }, interval)

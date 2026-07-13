@@ -2,6 +2,20 @@
 
 本项目所有重要变更记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [2.4.5] - 2026-07-13
+
+### Fixed
+
+- **YouTube 解析失败**（`Requested format is not available`）：升级 yt-dlp `2025.3.31` → `2026.7.4`，并在镜像内置 deno JS 运行时用于 nsig 解密。
+- **设置页多级路由刷新白屏**：Docker/Web 构建使用绝对资源路径，Tauri 构建保留相对路径。
+- **字幕优先任务的媒体降级**：已有平台字幕时，媒体元信息提取失败不再使任务整体失败，改为继续生成纯文字笔记。
+
+### Added
+
+- Cookie 删除 API 与设置页「清除 Cookie」按钮。
+- 任务失败原因透出到前端 toast 和任务卡片。
+- `YTDLP_AUTO_UPDATE` 环境变量：容器启动时可选更新 yt-dlp，默认关闭。
+
 ## [2.4.4] - 2026-06-23
 
 ### Security

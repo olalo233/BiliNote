@@ -3,7 +3,7 @@
     <p align="center">
   <img src="./doc/icon.svg" alt="BiliNote Banner" width="50" height="50"  />
 </p>
-<h1 align="center" > BiliNote v2.4.4</h1>
+<h1 align="center" > BiliNote v2.4.5</h1>
 </div>
 
 <p align="center"><i>AI 视频笔记生成工具 让 AI 为你的视频做笔记</i></p>
@@ -88,6 +88,13 @@ BiliNote 是一个开源的 AI 视频笔记助手，支持通过哔哩哔哩、Y
 - 桌面端后端健康监控韧性：退出自动清理 sidecar、启动失败展示原因 + 日志、不再无限「加载中」
 - whisper 模型损坏自愈：`model.bin` 截断时自动删除重下；空 API Key / 新模型 temperature 不兼容给出清晰提示
 - Docker 部署韧性：`BASE_REGISTRY` 可换国内镜像源、restart 策略修正、`.env.example` 端口与默认模型修正、新增部署 FAQ
+
+### v2.4.5 新增
+
+- YouTube 解析升级至 yt-dlp 2026.7.4，完整镜像内置 deno JS 运行时，并支持通过 `YTDLP_AUTO_UPDATE=1` 在启动时更新。
+- 有平台字幕时，即使媒体元信息提取失败也会降级生成纯文字笔记。
+- 设置页支持删除下载器 Cookie；任务失败时在 toast 和历史任务卡片中显示具体原因。
+- Web/Docker 构建修复设置页多级路由刷新白屏，Tauri 构建继续使用相对资源路径。
 
 ### v2.2.3 修订
 
@@ -179,6 +186,8 @@ docker run -d -p 80:80 \
   --name bilinote \
   ghcr.io/jefferyhcool/bilinote:latest
 ```
+
+如需在容器启动时自动更新 yt-dlp，可设置 `YTDLP_AUTO_UPDATE=1`（默认关闭，需容器能访问 PyPI）。
 
 上面四个卷分别持久化：`data`（SQLite 数据库 + 生成的笔记）、`config`（LLM 供应商配置 / Cookie / 转写设置）、`static`（笔记引用的视频截图）、`models`（Whisper 模型缓存，可选，避免每次重新下载）。这样 `docker pull` 升级新镜像、删旧容器重建后，配置和历史都不会丢。
 

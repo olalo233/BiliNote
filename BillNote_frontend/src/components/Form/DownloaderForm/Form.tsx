@@ -14,7 +14,11 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
-import { getDownloaderCookie, updateDownloaderCookie } from '@/services/downloader' // 你自定义的请求
+import {
+  deleteDownloaderCookie,
+  getDownloaderCookie,
+  updateDownloaderCookie,
+} from '@/services/downloader' // 你自定义的请求
 import { useParams } from 'react-router-dom'
 import { videoPlatforms } from '@/constant/note.ts'
 
@@ -30,6 +34,7 @@ const DownloaderForm = () => {
   const { id } = useParams()
 
   const [loading, setLoading] = useState(true)
+  const [hasCookie, setHasCookie] = useState(false)
 
   useEffect(() => {
     const loadCookie = async () => {
@@ -38,9 +43,11 @@ const DownloaderForm = () => {
         const res = await getDownloaderCookie(id)
         const cookie = res?.cookie || ''
         form.reset({ cookie }) // ✅ 正确重置表单值
+        setHasCookie(Boolean(cookie))
       } catch (e) {
         toast.error('加载 Cookie 失败: ' + e)
         form.reset({ cookie: '' }) // ❗失败时也要清空旧值
+        setHasCookie(false)
       } finally {
         setLoading(false)
       }
@@ -55,9 +62,23 @@ const DownloaderForm = () => {
         platform: id,
         cookie: String(values.cookie),
       })
+      setHasCookie(true)
       toast.success('保存成功')
-    } catch (e) {
+    } catch {
       toast.error('保存失败')
+    }
+  }
+
+  const onDelete = async () => {
+    if (!id || !hasCookie) return
+
+    try {
+      await deleteDownloaderCookie(id)
+      form.reset({ cookie: '' })
+      setHasCookie(false)
+      toast.success('Cookie 已清除')
+    } catch {
+      toast.error('清除 Cookie 失败')
     }
   }
 
@@ -85,7 +106,12 @@ const DownloaderForm = () => {
             )}
           />
 
-          <Button type="submit">保存</Button>
+          <div className="flex gap-2">
+            <Button type="submit">保存</Button>
+            <Button type="button" variant="outline" disabled={!hasCookie} onClick={onDelete}>
+              清除 Cookie
+            </Button>
+          </div>
         </form>
       </Form>
     </div>
