@@ -3,6 +3,7 @@ import logging
 import os
 import re
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Tuple, Union, Any
 
@@ -30,6 +31,9 @@ from app.models.notes_model import AudioDownloadResult, NoteResult
 from app.models.transcriber_model import TranscriptResult, TranscriptSegment
 from app.services.constant import SUPPORT_PLATFORM_MAP
 from app.services.provider import ProviderService
+from app.services import object_storage
+from app.services.object_storage import ObjectStorageError
+from app.services.storage_config_manager import storage_config_manager
 from app.transcriber.base import Transcriber
 from app.transcriber.transcriber_provider import get_transcriber, _transcribers
 from app.utils.note_helper import replace_content_markers, prepend_source_link
@@ -55,6 +59,12 @@ NOTE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 IMAGE_OUTPUT_DIR = os.getenv("OUT_DIR", "./static/screenshots")
 # 图片基础 URL（用于生成 Markdown 中的图片链接，需前端静态目录对应）
 IMAGE_BASE_URL = os.getenv("IMAGE_BASE_URL", "/static/screenshots")
+IMAGE_CONTENT_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
 
 # 日志配置
 logger = logging.getLogger(__name__)
@@ -258,6 +268,7 @@ class NoteGenerator:
                     formats=effective_formats,
                     audio_meta=audio_meta,
                     platform=platform,
+                    task_id=task_id,
                 )
 
             markdown = prepend_source_link(markdown, str(video_url))
@@ -662,6 +673,7 @@ class NoteGenerator:
         formats: List[str],
         audio_meta: AudioDownloadResult,
         platform: str,
+        task_id: Optional[str] = None,
     ) -> str:
         """
         对生成的 Markdown 做后期处理：插入截图和/或插入链接。
@@ -675,7 +687,7 @@ class NoteGenerator:
         """
         if "screenshot" in formats and video_path:
             try:
-                markdown = self._insert_screenshots(markdown, video_path)
+                markdown = self._insert_screenshots(markdown, video_path, task_id=task_id)
             except Exception as exc:
                 logger.warning("截图插入失败，跳过该步骤")
 
@@ -687,7 +699,12 @@ class NoteGenerator:
 
         return markdown
 
-    def _insert_screenshots(self, markdown: str, video_path: Path) -> str | None | Any:
+    def _insert_screenshots(
+        self,
+        markdown: str,
+        video_path: Path,
+        task_id: Optional[str] = None,
+    ) -> str | None | Any:
         """
         扫描 Markdown 文本中所有 Screenshot 标记，并替换为实际生成的截图链接。
 
@@ -701,13 +718,58 @@ class NoteGenerator:
                 img_path = generate_screenshot(str(video_path), str(IMAGE_OUTPUT_DIR), ts, idx)
                 filename = Path(img_path).name
                 # 构建前端可访问的 URL，例如 /static/screenshots/{filename}
-                img_url = f"{IMAGE_BASE_URL.rstrip('/')}/{filename}"
+                local_img_url = f"{IMAGE_BASE_URL.rstrip('/')}/{filename}"
+                img_url = self._upload_screenshot(
+                    img_path=Path(img_path),
+                    filename=filename,
+                    task_id=task_id,
+                ) or local_img_url
                 markdown = markdown.replace(marker, f"![]({img_url})", 1)
             except Exception as exc:
                 logger.error(f"生成截图失败 (timestamp={ts})：{exc}")
                 # self._handle_exception(task_id, exc)
                 return None
         return markdown
+
+    @staticmethod
+    def _image_bed_key(task_id: Optional[str], filename: str, now: Optional[datetime] = None) -> str:
+        """Build the stable image-bed key without probing object existence."""
+
+        config = storage_config_manager.get_effective_feature("image_bed")
+        path_prefix = str(config.get("path_prefix") or "").strip("/")
+        safe_task_id = str(task_id or "unknown-task").strip("/")
+        safe_filename = Path(filename).name
+        month = (now or datetime.now(timezone.utc)).strftime("%Y-%m")
+        parts = [part for part in (path_prefix, month, safe_task_id, safe_filename) if part]
+        return "/".join(parts)
+
+    def _upload_screenshot(
+        self,
+        img_path: Path,
+        filename: str,
+        task_id: Optional[str],
+    ) -> Optional[str]:
+        config = storage_config_manager.get_effective_feature("image_bed")
+        if not config.get("enabled"):
+            return None
+
+        source = str(config.get("source") or "")
+        public_base_url = str(config.get("public_base_url") or "").rstrip("/")
+        key = self._image_bed_key(task_id, filename)
+        content_type = IMAGE_CONTENT_TYPES.get(img_path.suffix.lower(), "application/octet-stream")
+        try:
+            object_storage.put_file(source, key, img_path, content_type)
+            logger.info("截图已上传图床 source=%s key=%s", source, key)
+            if not public_base_url:
+                logger.warning("图床已启用但 public_base_url 为空，截图回退本地 URL key=%s", key)
+                return None
+            return f"{public_base_url}/{key}"
+        except ObjectStorageError as exc:
+            logger.warning("图床截图上传失败，回退本地 URL source=%s key=%s: %s", source, key, exc)
+            return None
+        except Exception as exc:
+            logger.warning("图床截图上传失败，回退本地 URL source=%s key=%s: %s", source, key, exc)
+            return None
 
     @staticmethod
     def _extract_screenshot_timestamps(markdown: str) -> List[Tuple[str, int]]:
