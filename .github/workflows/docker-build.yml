@@ -46,9 +46,8 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # Raw tags support the fork-only v2.4.5e suffix without SemVer warnings.
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
             type=raw,value=${{ steps.app-version.outputs.version }},enable=${{ steps.app-version.outputs.version != '' }}
             type=sha,prefix=
             type=raw,value=latest,enable=true
@@ -118,7 +117,7 @@ jobs:
       - name: Run image smoke tests
         shell: bash
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
           IMAGE="${REGISTRY}/${GITHUB_REPOSITORY,,}"
           IMAGE_REF="$IMAGE:$VERSION"

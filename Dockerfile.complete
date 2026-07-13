@@ -85,6 +85,8 @@ COPY --from=deno-bin /deno /usr/local/bin/deno
 ENV PATH="/usr/bin:${PATH}"
 ENV HF_ENDPOINT=https://hf-mirror.com
 ENV PYTHONUNBUFFERED=1
+ENV YTDLP_AUTO_UPDATE=0
+ENV PIP_INDEX_URL=""
 
 # 复制 Python 依赖
 COPY --from=backend-builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
@@ -117,7 +119,7 @@ nodaemon=true
 user=root
 logfile=/var/log/supervisor/supervisord.log
 pidfile=/var/run/supervisord.pid
-environment=BACKEND_PORT="8483",BACKEND_HOST="0.0.0.0",TRANSCRIBER_TYPE="fast-whisper",WHISPER_MODEL_SIZE="tiny",FFMPEG_BIN_PATH="",HF_ENDPOINT="https://hf-mirror.com",STATIC="/static",OUT_DIR="./static/screenshots",DATA_DIR="data",NOTE_OUTPUT_DIR="data/note_results",DATABASE_URL="sqlite:////app/backend/data/bili_note.db",IMAGE_BASE_URL="/static/screenshots",ENV="production",GROQ_TRANSCRIBER_MODEL="whisper-large-v3-turbo",YTDLP_AUTO_UPDATE="0",PIP_INDEX_URL=""
+environment=BACKEND_PORT="8483",BACKEND_HOST="0.0.0.0",TRANSCRIBER_TYPE="fast-whisper",WHISPER_MODEL_SIZE="tiny",FFMPEG_BIN_PATH="",HF_ENDPOINT="https://hf-mirror.com",STATIC="/static",OUT_DIR="./static/screenshots",DATA_DIR="data",NOTE_OUTPUT_DIR="data/note_results",DATABASE_URL="sqlite:////app/backend/data/bili_note.db",IMAGE_BASE_URL="/static/screenshots",ENV="production",GROQ_TRANSCRIBER_MODEL="whisper-large-v3-turbo"
 
 [program:nginx]
 command=nginx -g "daemon off;"
