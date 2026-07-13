@@ -153,17 +153,40 @@ def get_bytes(source: str, key: str) -> bytes:
 
 def list_prefix_stats(source: str, prefix: str = "") -> dict[str, Any]:
     try:
-        objects = get_client(source).list_objects(_bucket(source), prefix=prefix, recursive=True)
+        objects = list_objects(source, prefix)
         count = 0
         total_size = 0
         latest_upload: datetime | None = None
         for item in objects:
             count += 1
-            total_size += int(getattr(item, "size", 0) or 0)
-            modified = getattr(item, "last_modified", None)
+            total_size += item.size
+            modified = item.last_modified
             if modified and (latest_upload is None or modified > latest_upload):
                 latest_upload = modified
         return {"object_count": count, "total_size": total_size, "latest_upload": latest_upload}
+    except ObjectStorageError:
+        raise
+    except Exception as exc:
+        logger.exception("列举对象失败 source=%s key=%s", source, prefix)
+        raise ObjectStorageError(source, prefix, str(exc)) from exc
+
+
+def list_objects(source: str, prefix: str = "") -> list[ObjectInfo]:
+    """List object metadata under a prefix for restore and resource-pack views."""
+
+    try:
+        objects = get_client(source).list_objects(_bucket(source), prefix=prefix, recursive=True)
+        result = []
+        for item in objects:
+            result.append(
+                ObjectInfo(
+                    key=str(getattr(item, "object_name", "")),
+                    size=int(getattr(item, "size", 0) or 0),
+                    last_modified=getattr(item, "last_modified", None),
+                    etag=getattr(item, "etag", None),
+                )
+            )
+        return result
     except ObjectStorageError:
         raise
     except Exception as exc:

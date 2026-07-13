@@ -113,6 +113,7 @@ class NoteGenerator:
         video_understanding: bool = False,
         video_interval: int = 0,
         grid_size: Optional[List[int]] = None,
+        archive_video: bool = False,
     ) -> NoteResult | None:
         """
         主流程：按步骤依次下载、转写、GPT 总结、截图/链接处理、存库、返回 NoteResult。
@@ -145,6 +146,7 @@ class NoteGenerator:
 
             downloader = self._get_downloader(platform)
             gpt = self._get_gpt(model_name, provider_id)
+            video_id = extract_video_id(str(video_url), platform)
 
             # 缓存文件路径
             audio_cache_file = NOTE_OUTPUT_DIR / f"{task_id}_audio.json"
@@ -152,6 +154,7 @@ class NoteGenerator:
             markdown_cache_file = NOTE_OUTPUT_DIR / f"{task_id}_markdown.md"
             # 1. 获取字幕/转写：优先缓存 → 平台字幕 → 音频转写
             transcript = None
+            restored_from_assets = False
 
             # 尝试读取缓存
             if transcript_cache_file.exists():
@@ -167,6 +170,16 @@ class NoteGenerator:
                     logger.info(f"已从缓存加载转写结果，共 {len(segments)} 段")
                 except Exception as e:
                     logger.warning(f"加载转写缓存失败: {e}")
+
+            # 本地任务缓存没有命中时，先从资产桶恢复，避免源站不可达时丢失收藏内容。
+            if transcript is None and video_id:
+                try:
+                    from app.services.asset_archive import restore_transcript
+
+                    transcript = restore_transcript(platform, video_id, transcript_cache_file)
+                    restored_from_assets = transcript is not None
+                except Exception as exc:
+                    logger.warning("从资产桶还原转写失败 video_id=%s: %s", video_id, exc)
 
             # 缓存没有，尝试获取平台字幕
             if transcript is None:
@@ -192,20 +205,37 @@ class NoteGenerator:
             need_full_download = not has_transcript or screenshot or video_understanding
             media_degraded = False
             try:
-                audio_meta = self._download_media(
-                    downloader=downloader,
-                    video_url=video_url,
-                    quality=quality,
-                    audio_cache_file=audio_cache_file,
-                    status_phase=TaskStatus.DOWNLOADING,
-                    platform=platform,
-                    output_path=output_path,
-                    screenshot=screenshot,
-                    video_understanding=video_understanding,
-                    video_interval=video_interval,
-                    grid_size=grid_size,
-                    skip_download=not need_full_download,
-                )
+                if restored_from_assets and not screenshot and not video_understanding:
+                    audio_meta = AudioDownloadResult(
+                        file_path="",
+                        title=video_id or str(video_url),
+                        duration=0,
+                        cover_url=None,
+                        platform=platform,
+                        video_id=video_id or str(video_url),
+                        raw_info={"tags": []},
+                        video_path=None,
+                    )
+                    audio_cache_file.write_text(
+                        json.dumps(asdict(audio_meta), ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                    logger.info("已从资产桶还原转写，跳过源站媒体元信息请求 video_id=%s", video_id)
+                else:
+                    audio_meta = self._download_media(
+                        downloader=downloader,
+                        video_url=video_url,
+                        quality=quality,
+                        audio_cache_file=audio_cache_file,
+                        status_phase=TaskStatus.DOWNLOADING,
+                        platform=platform,
+                        output_path=output_path,
+                        screenshot=screenshot,
+                        video_understanding=video_understanding,
+                        video_interval=video_interval,
+                        grid_size=grid_size,
+                        skip_download=not need_full_download,
+                    )
             except Exception as exc:
                 if not has_transcript:
                     raise
@@ -231,6 +261,9 @@ class NoteGenerator:
                     else "不含媒体信息",
                     exc,
                 )
+
+            if self.video_path and not audio_meta.video_path:
+                audio_meta.video_path = str(self.video_path)
 
             # 3. 如果前面没拿到字幕，走转写流程
             if transcript is None:

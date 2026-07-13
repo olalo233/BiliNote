@@ -50,6 +50,7 @@ class VideoRequest(BaseModel):
     video_understanding: Optional[bool] = False
     video_interval: Optional[int] = 0
     grid_size: Optional[list] = []
+    archive_video: bool = False
     # 客户端（如浏览器插件）已经在用户浏览器里抓到字幕，直接传给后端复用，
     # 跳过 download_subtitles 和音频转写。形如：
     #   {"language": "zh", "full_text": "...", "segments": [{"start","end","text"}, ...]}
@@ -115,7 +116,7 @@ def _persist_prefetched_transcript(task_id: str, transcript: dict) -> None:
 def run_note_task(task_id: str, video_url: str, platform: str, quality: DownloadQuality,
                   link: bool = False, screenshot: bool = False, model_name: str = None, provider_id: str = None,
                   _format: list = None, style: str = None, extras: str = None, video_understanding: bool = False,
-                  video_interval=0, grid_size=[]
+                  video_interval=0, grid_size=[], archive_video: bool = False
                   ):
 
     if not model_name or not provider_id:
@@ -137,6 +138,7 @@ def run_note_task(task_id: str, video_url: str, platform: str, quality: Download
             video_understanding=video_understanding,
             video_interval=video_interval,
             grid_size=grid_size,
+            archive_video=archive_video,
         )
 
     logger.info(f"任务进入执行队列 (task_id={task_id})")
@@ -146,6 +148,21 @@ def run_note_task(task_id: str, video_url: str, platform: str, quality: Download
         logger.warning(f"任务 {task_id} 执行失败，跳过保存")
         return
     save_note_to_file(task_id, note)
+
+    # 资产归档在笔记主链路之外执行，任何对象存储错误都不能改变 SUCCESS。
+    try:
+        from app.services.asset_archive import enqueue_archive
+
+        enqueue_archive(
+            task_id=task_id,
+            platform=platform,
+            video_url=video_url,
+            note=note,
+            transcript_cache_file=Path(NOTE_OUTPUT_DIR) / f"{task_id}_transcript.json",
+            archive_video=archive_video,
+        )
+    except Exception as e:
+        logger.warning(f"投递资产归档失败（不影响笔记）: {e}")
 
     # 自动建立向量索引（用于 AI 问答），失败不影响笔记生成
     try:
@@ -228,7 +245,8 @@ def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
 
         background_tasks.add_task(run_note_task, task_id, data.video_url, data.platform, data.quality, data.link,
                                   data.screenshot, data.model_name, data.provider_id, data.format, data.style,
-                                  data.extras, data.video_understanding, data.video_interval, data.grid_size)
+                                  data.extras, data.video_understanding, data.video_interval, data.grid_size,
+                                  data.archive_video)
         return R.success({"task_id": task_id})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
