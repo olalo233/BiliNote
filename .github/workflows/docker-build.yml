@@ -118,6 +118,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+          trap 'status=$?; echo "::error title=Smoke command failed::${BASH_COMMAND} (line ${LINENO})"; exit "$status"' ERR
           VERSION="${GITHUB_REF_NAME#v}"
           IMAGE="${REGISTRY}/${GITHUB_REPOSITORY,,}"
           IMAGE_REF="$IMAGE:$VERSION"
@@ -187,7 +188,11 @@ jobs:
             fi
             sleep 2
           done
-          docker exec "$CONTAINER-auto" sh -c 'grep -F "[ytdlp-auto-update] 升级失败" /var/log/supervisor/backend.log'
+          if ! docker exec "$CONTAINER-auto" sh -c 'grep -F "[ytdlp-auto-update] 升级失败" /var/log/supervisor/backend.log'; then
+            docker logs "$CONTAINER-auto" || true
+            echo '::error title=Auto-update fallback missing::backend did not log the expected failed-update fallback.'
+            exit 1
+          fi
 
           if timeout 45s docker exec "$CONTAINER" python -m yt_dlp -F 'https://www.youtube.com/watch?v=YM0_8mOaKic' > /tmp/youtube-formats.txt 2>&1; then
             if grep -Eiq 'm4a|webm|audio' /tmp/youtube-formats.txt; then
