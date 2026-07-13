@@ -35,7 +35,8 @@ _usage_cache: dict[str, tuple[float, dict[str, object]]] = {}
 
 class StorageSourceRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
-    type: Literal["s3"] = "s3"
+    type: Literal["minio", "s3"] = "minio"
+    feature: Literal["image_bed", "assets"] | None = None
     endpoint: str = Field(min_length=1)
     access_key: str = ""
     secret_key: str = ""

@@ -1,7 +1,8 @@
 import request from '@/utils/request'
 
 export interface StorageSource {
-  type: 's3'
+  type: 'minio' | 's3'
+  feature?: StorageFeature
   endpoint: string
   access_key: string
   secret_key: string
@@ -28,7 +29,8 @@ export type StorageFeature = 'image_bed' | 'assets'
 
 export interface StorageSourcePayload {
   name: string
-  type: 's3'
+  type: 'minio' | 's3'
+  feature?: StorageFeature
   endpoint: string
   access_key: string
   secret_key: string

@@ -102,3 +102,20 @@ def test_storage_source_routes_mask_and_retain_secret(monkeypatch, tmp_path):
     )
     assert response_body(second)["data"]["secret_key"] == f"{SECRET_MASK}1234"
     assert manager.get_source("source")["secret_key"] == "secret-1234"
+
+
+def test_storage_source_routes_accept_minio_type_and_feature_scope(monkeypatch, tmp_path):
+    manager = StorageConfigManager(str(tmp_path / "storage.json"))
+    monkeypatch.setattr(storage_router, "storage_config_manager", manager)
+
+    response = storage_router.save_storage_source(
+        storage_router.StorageSourceRequest(
+            name="image-source",
+            feature="image_bed",
+            **{**source_payload(), "type": "minio"},
+        )
+    )
+
+    assert response_body(response)["data"]["name"] == "image-source"
+    assert manager.get_source("image-source")["type"] == "minio"
+    assert manager.get_source("image-source")["feature"] == "image_bed"

@@ -29,6 +29,8 @@ const Monitor = lazy(() => import('@/pages/SettingPage/Monitor.tsx'))
 const Downloader = lazy(() => import('@/pages/SettingPage/Downloader.tsx'))
 const DownloaderForm = lazy(() => import('@/components/Form/DownloaderForm/Form.tsx'))
 const TranscriberPage = lazy(() => import('@/pages/SettingPage/transcriber.tsx'))
+const StorageSources = lazy(() => import('@/pages/SettingPage/StorageSources.tsx'))
+const StorageSourceForm = lazy(() => import('@/pages/SettingPage/StorageSourceForm.tsx'))
 const StorageFeature = lazy(() => import('@/pages/SettingPage/StorageFeature.tsx'))
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'))
 
@@ -84,8 +86,14 @@ function App() {
                 </Route>
                 <Route path="transcriber" element={<TranscriberPage />} />
                 <Route path="monitor" element={<Monitor />}></Route>
-                <Route path="image-bed" element={<StorageFeature feature="image_bed" />} />
-                <Route path="assets" element={<StorageFeature feature="assets" />} />
+                <Route path="image-bed" element={<StorageSources feature="image_bed" />}>
+                  <Route path="new" element={<StorageSourceForm feature="image_bed" />} />
+                  <Route path=":sourceName" element={<StorageFeature feature="image_bed" />} />
+                </Route>
+                <Route path="assets" element={<StorageSources feature="assets" />}>
+                  <Route path="new" element={<StorageSourceForm feature="assets" />} />
+                  <Route path=":sourceName" element={<StorageFeature feature="assets" />} />
+                </Route>
                 <Route path="about" element={<AboutPage />}></Route>
                 <Route path="*" element={<NotFoundPage />} />
               </Route>

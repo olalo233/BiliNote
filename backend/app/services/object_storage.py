@@ -36,7 +36,7 @@ def _source(source_name: str, manager: StorageConfigManager | None = None) -> di
     source = (manager or storage_config_manager).get_source(source_name)
     if not source:
         raise ObjectStorageError(source_name, "", "source 不存在")
-    if source.get("type", "s3") != "s3":
+    if source.get("type", "s3") not in {"minio", "s3"}:
         raise ObjectStorageError(source_name, "", f"不支持的 source type={source.get('type')}")
     return source
 

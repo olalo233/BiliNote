@@ -1,18 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
-import {
-  Archive,
-  CheckCircle2,
-  Database,
-  Image as ImageIcon,
-  Loader2,
-  Plus,
-  RefreshCw,
-  Save,
-  Server,
-  Trash2,
-  XCircle,
-} from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { ArrowLeft, Archive, CheckCircle2, Database, Image as ImageIcon, Loader2, RefreshCw, Save, XCircle } from 'lucide-react'
+import { Link, useParams } from 'react-router-dom'
 import { toast } from 'react-hot-toast'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -23,13 +11,12 @@ import {
   getStorageConfig,
   getStorageUsage,
   saveStorageFeature,
-  saveStorageSource,
-  testStorageSource,
-  deleteStorageSource,
   StorageConfig,
   StorageFeature as StorageFeatureName,
+  StorageSource,
   StorageTestResult,
   StorageUsage,
+  testStorageSource,
 } from '@/services/storage'
 
 interface StorageFeatureProps {
@@ -41,26 +28,6 @@ interface FeatureForm {
   source: string
   public_base_url: string
   path_prefix: string
-}
-
-interface SourceDraft {
-  name: string
-  endpoint: string
-  access_key: string
-  secret_key: string
-  bucket: string
-  path_style: boolean
-  use_ssl: boolean
-}
-
-const emptySource: SourceDraft = {
-  name: '',
-  endpoint: '',
-  access_key: '',
-  secret_key: '',
-  bucket: '',
-  path_style: true,
-  use_ssl: false,
 }
 
 const featureLabels: Record<StorageFeatureName, { title: string; description: string }> = {
@@ -79,6 +46,24 @@ const testStepLabels: Record<string, string> = {
   get: '读取测试对象',
   public_get: '公网读取',
   delete: '删除测试对象',
+}
+
+const sourceTypeLabels: Record<StorageSource['type'], string> = {
+  minio: 'MinIO',
+  s3: 'S3',
+}
+
+function featurePath(feature: StorageFeatureName) {
+  return feature === 'image_bed' ? '/settings/image-bed' : '/settings/assets'
+}
+
+function decodeSourceName(value: string | undefined) {
+  if (!value) return ''
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
 }
 
 function formatSize(size: number) {
@@ -117,7 +102,7 @@ function UsageCard({
       <CardContent>
         {!usage ? (
           <div className="text-muted-foreground rounded-md border border-dashed p-6 text-center text-sm">
-            启用功能并绑定存储源后显示用量
+            启用功能并绑定存储供应商后显示用量
           </div>
         ) : (
           <>
@@ -142,16 +127,13 @@ function UsageCard({
             {usage.details && (
               <div className="mt-4 flex flex-wrap gap-2 text-sm">
                 <Badge variant="secondary">
-                  视频 {usage.details.video.object_count} ·{' '}
-                  {formatSize(usage.details.video.total_size)}
+                  视频 {usage.details.video.object_count} · {formatSize(usage.details.video.total_size)}
                 </Badge>
                 <Badge variant="secondary">
-                  音频 {usage.details.audio.object_count} ·{' '}
-                  {formatSize(usage.details.audio.total_size)}
+                  音频 {usage.details.audio.object_count} · {formatSize(usage.details.audio.total_size)}
                 </Badge>
                 <Badge variant="secondary">
-                  字幕/转写 {usage.details.text.object_count} ·{' '}
-                  {formatSize(usage.details.text.total_size)}
+                  字幕/转写 {usage.details.text.object_count} · {formatSize(usage.details.text.total_size)}
                 </Badge>
               </div>
             )}
@@ -186,16 +168,17 @@ function TestResult({ result }: { result: StorageTestResult | null }) {
 }
 
 export default function StorageFeature({ feature }: StorageFeatureProps) {
+  const { sourceName: sourceNameParam } = useParams()
+  const sourceName = decodeSourceName(sourceNameParam)
   const metadata = featureLabels[feature]
+  const basePath = featurePath(feature)
   const [config, setConfig] = useState<StorageConfig | null>(null)
   const [featureForm, setFeatureForm] = useState<FeatureForm>({
     enabled: false,
-    source: '',
+    source: sourceName,
     public_base_url: '',
     path_prefix: '',
   })
-  const [sourceDraft, setSourceDraft] = useState<SourceDraft>(emptySource)
-  const [showSourceForm, setShowSourceForm] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -207,11 +190,12 @@ export default function StorageFeature({ feature }: StorageFeatureProps) {
     setLoading(true)
     try {
       const nextConfig = await getStorageConfig()
-      setConfig(nextConfig)
       const nextFeature = nextConfig[feature]
+      const selectedSource = sourceName || nextFeature.source
+      setConfig(nextConfig)
       setFeatureForm({
-        enabled: nextFeature.enabled,
-        source: nextFeature.source,
+        enabled: nextFeature.enabled && nextFeature.source === selectedSource,
+        source: selectedSource,
         public_base_url: feature === 'image_bed' ? nextFeature.public_base_url : '',
         path_prefix: feature === 'image_bed' ? nextFeature.path_prefix : '',
       })
@@ -220,7 +204,7 @@ export default function StorageFeature({ feature }: StorageFeatureProps) {
     } finally {
       setLoading(false)
     }
-  }, [feature])
+  }, [feature, sourceName])
 
   const loadUsage = useCallback(
     async (refresh = false) => {
@@ -248,41 +232,11 @@ export default function StorageFeature({ feature }: StorageFeatureProps) {
     void loadUsage()
   }, [loadUsage])
 
-  const sourceEntries = useMemo(() => Object.entries(config?.sources || {}), [config])
-
-  const handleCreateSource = async () => {
-    if (!sourceDraft.name || !sourceDraft.endpoint || !sourceDraft.bucket) {
-      toast.error('请填写源名称、Endpoint 和桶名')
-      return
-    }
-    setSaving(true)
-    try {
-      await saveStorageSource({ type: 's3', ...sourceDraft })
-      toast.success('存储源已保存')
-      setSourceDraft(emptySource)
-      setShowSourceForm(false)
-      await loadConfig()
-    } catch {
-      toast.error('存储源保存失败')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleDeleteSource = async (name: string) => {
-    if (!window.confirm(`确认删除存储源「${name}」吗？`)) return
-    try {
-      await deleteStorageSource(name)
-      toast.success('存储源已删除')
-      await loadConfig()
-    } catch {
-      toast.error('存储源删除失败，请确认它没有被功能引用')
-    }
-  }
+  const source = config?.sources[sourceName]
 
   const handleSaveFeature = async () => {
-    if (featureForm.enabled && !featureForm.source) {
-      toast.error('启用功能前请选择存储源')
+    if (!featureForm.source) {
+      toast.error('当前供应商不存在，请返回列表重新选择')
       return
     }
     setSaving(true)
@@ -310,7 +264,7 @@ export default function StorageFeature({ feature }: StorageFeatureProps) {
 
   const handleTest = async () => {
     if (!featureForm.source) {
-      toast.error('请先选择存储源')
+      toast.error('当前供应商不存在，请返回列表重新选择')
       return
     }
     setTesting(true)
@@ -329,20 +283,10 @@ export default function StorageFeature({ feature }: StorageFeatureProps) {
       <div className="mx-auto max-w-5xl space-y-6 px-6 py-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <div className="mb-3 flex items-center gap-2 text-sm">
-              <Link
-                className={`rounded-md px-3 py-1.5 ${feature === 'image_bed' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}
-                to="/settings/image-bed"
-              >
-                图床
-              </Link>
-              <Link
-                className={`rounded-md px-3 py-1.5 ${feature === 'assets' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}
-                to="/settings/assets"
-              >
-                资产
-              </Link>
-            </div>
+            <Link to={basePath} className="mb-4 inline-flex items-center text-sm text-blue-600 hover:underline">
+              <ArrowLeft className="mr-1 h-4 w-4" />
+              返回{metadata.title}供应商列表
+            </Link>
             <div className="flex items-center gap-3">
               {feature === 'image_bed' ? (
                 <ImageIcon className="h-7 w-7 text-blue-600" />
@@ -361,140 +305,40 @@ export default function StorageFeature({ feature }: StorageFeatureProps) {
         </div>
 
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
-              <Server className="h-5 w-5" />
-              存储源
+              <Database className="h-5 w-5" />
+              当前供应商
             </CardTitle>
-            <Button variant="outline" size="sm" onClick={() => setShowSourceForm(value => !value)}>
-              <Plus className="mr-2 h-4 w-4" />
-              新建源
-            </Button>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
-              <label className="space-y-2 text-sm font-medium">
-                <span>当前绑定源</span>
-                <select
-                  className="border-input bg-background flex h-9 w-full rounded-md border px-3 text-sm"
-                  value={featureForm.source}
-                  onChange={event =>
-                    setFeatureForm(form => ({ ...form, source: event.target.value }))
-                  }
-                  disabled={loading}
-                >
-                  <option value="">请选择存储源</option>
-                  {sourceEntries.map(([name]) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex h-9 items-center gap-3 text-sm font-medium">
-                <Switch
-                  checked={featureForm.enabled}
-                  onCheckedChange={enabled => setFeatureForm(form => ({ ...form, enabled }))}
-                />
-                启用{metadata.title}
-              </label>
-            </div>
-
-            {sourceEntries.length > 0 && (
-              <div className="divide-y rounded-md border">
-                {sourceEntries.map(([name, source]) => (
-                  <div key={name} className="flex flex-wrap items-center gap-3 px-3 py-2 text-sm">
-                    <Database className="text-muted-foreground h-4 w-4" />
-                    <span className="font-medium">{name}</span>
-                    <span className="text-muted-foreground">
-                      {source.endpoint} / {source.bucket}
-                    </span>
-                    <span className="text-muted-foreground ml-auto">
-                      密钥：{source.secret_key || '未设置'}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-red-600"
-                      onClick={() => void handleDeleteSource(name)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {showSourceForm && (
-              <div className="grid gap-3 rounded-md border bg-slate-50 p-4 md:grid-cols-2">
-                <Input
-                  placeholder="源名称"
-                  value={sourceDraft.name}
-                  onChange={event =>
-                    setSourceDraft(form => ({ ...form, name: event.target.value }))
-                  }
-                />
-                <Input
-                  placeholder="Endpoint，例如 img.example:9000"
-                  value={sourceDraft.endpoint}
-                  onChange={event =>
-                    setSourceDraft(form => ({ ...form, endpoint: event.target.value }))
-                  }
-                />
-                <Input
-                  placeholder="Access key"
-                  value={sourceDraft.access_key}
-                  onChange={event =>
-                    setSourceDraft(form => ({ ...form, access_key: event.target.value }))
-                  }
-                />
-                <Input
-                  type="password"
-                  placeholder="Secret key"
-                  value={sourceDraft.secret_key}
-                  onChange={event =>
-                    setSourceDraft(form => ({ ...form, secret_key: event.target.value }))
-                  }
-                />
-                <Input
-                  placeholder="桶名"
-                  value={sourceDraft.bucket}
-                  onChange={event =>
-                    setSourceDraft(form => ({ ...form, bucket: event.target.value }))
-                  }
-                />
-                <div className="flex items-center gap-4 text-sm">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={sourceDraft.path_style}
-                      onChange={event =>
-                        setSourceDraft(form => ({ ...form, path_style: event.target.checked }))
-                      }
-                    />
-                    Path style
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={sourceDraft.use_ssl}
-                      onChange={event =>
-                        setSourceDraft(form => ({ ...form, use_ssl: event.target.checked }))
-                      }
-                    />
-                    HTTPS
-                  </label>
-                  <Button
-                    className="ml-auto"
-                    size="sm"
-                    onClick={() => void handleCreateSource()}
-                    disabled={saving}
-                  >
-                    <Save className="mr-2 h-4 w-4" />
-                    保存源
-                  </Button>
+          <CardContent>
+            {loading ? (
+              <div className="text-sm text-muted-foreground">加载中…</div>
+            ) : source ? (
+              <div className="grid gap-3 text-sm sm:grid-cols-2">
+                <div>
+                  <span className="text-muted-foreground">名称：</span>
+                  <span className="font-medium">{sourceName}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">类型：</span>
+                  <span className="font-medium">{sourceTypeLabels[source.type] || source.type}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Endpoint：</span>
+                  <span className="font-medium">{source.endpoint}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">桶：</span>
+                  <span className="font-medium">{source.bucket}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Secret key：</span>
+                  <span className="font-medium">{source.secret_key || '未设置'}</span>
                 </div>
               </div>
+            ) : (
+              <div className="text-sm text-red-600">供应商不存在，请返回左侧列表重新选择。</div>
             )}
           </CardContent>
         </Card>
@@ -504,6 +348,15 @@ export default function StorageFeature({ feature }: StorageFeatureProps) {
             <CardTitle className="text-lg">功能设置</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            <label className="flex items-center gap-3 text-sm font-medium">
+              <Switch
+                checked={featureForm.enabled}
+                onCheckedChange={enabled => setFeatureForm(form => ({ ...form, enabled }))}
+                disabled={!source}
+              />
+              启用{metadata.title}
+            </label>
+
             {feature === 'image_bed' ? (
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="space-y-2 text-sm font-medium">
@@ -535,7 +388,7 @@ export default function StorageFeature({ feature }: StorageFeatureProps) {
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 onClick={() => void handleTest()}
-                disabled={testing || !featureForm.source}
+                disabled={testing || !source}
                 variant="outline"
               >
                 {testing ? (
@@ -545,7 +398,7 @@ export default function StorageFeature({ feature }: StorageFeatureProps) {
                 )}
                 测试连接
               </Button>
-              <Button onClick={() => void handleSaveFeature()} disabled={saving || loading}>
+              <Button onClick={() => void handleSaveFeature()} disabled={saving || loading || !source}>
                 {saving ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
