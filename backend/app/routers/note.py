@@ -216,6 +216,8 @@ def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
                         "transcriber_type": readiness["transcriber_type"],
                         "model_size": readiness["model_size"],
                         "downloading": readiness["downloading"],
+                        "local_whisper_installed": readiness.get("local_whisper_installed"),
+                        "optional_dependency_status": readiness.get("optional_dependency_status"),
                     },
                 )
 

@@ -80,6 +80,8 @@ class TranscriberConfigManager:
             "model_size": size,
             "downloading": False,
             "reason": "",
+            "local_whisper_installed": None,
+            "optional_dependency_status": None,
         }
         if ttype not in ("fast-whisper", "mlx-whisper"):
             return result  # 在线引擎无需本地模型
@@ -89,8 +91,8 @@ class TranscriberConfigManager:
             from app.routers.config import (
                 _check_whisper_model_exists,
                 _check_mlx_whisper_model_exists,
-                _downloading,
             )
+            from app.transcriber import model_download_state as dl_state
         except Exception as e:
             # 拿不到检查函数时保守放行，不要把用户卡死
             result["reason"] = f"无法检查模型状态: {e}"
@@ -98,10 +100,15 @@ class TranscriberConfigManager:
 
         if ttype == "fast-whisper":
             downloaded = _check_whisper_model_exists(size, "whisper")
-            downloading = _downloading.get(size) == "downloading"
+            downloading = dl_state.is_downloading(size)
+            from app.services.optional_deps import is_local_whisper_installed
+            result["local_whisper_installed"] = is_local_whisper_installed()
+            result["optional_dependency_status"] = (
+                "installed" if result["local_whisper_installed"] else "local_whisper_not_installed"
+            )
         else:  # mlx-whisper
             downloaded = _check_mlx_whisper_model_exists(size)
-            downloading = _downloading.get(f"mlx-{size}") == "downloading"
+            downloading = dl_state.is_downloading(f"mlx-{size}")
 
         result["downloading"] = downloading
         if downloaded:

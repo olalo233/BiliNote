@@ -69,6 +69,7 @@ WHISPER_MODEL_SIZES = ["tiny", "base", "small", "medium", "large-v3", "large-v3-
 def get_transcriber_config():
     from app.transcriber.transcriber_provider import MLX_WHISPER_AVAILABLE
     from app.transcriber.whisper_models import get_registry, BUILTIN_WHISPER_MODELS
+    from app.services.optional_deps import is_local_whisper_installed
 
     registry = get_registry()
     config = transcriber_config_manager.get_config()
@@ -80,6 +81,7 @@ def get_transcriber_config():
         "whisper_builtin_models": BUILTIN_WHISPER_MODELS,
         "whisper_custom_models": registry.get_custom_models(),
         "mlx_whisper_available": MLX_WHISPER_AVAILABLE,
+        "local_whisper_installed": is_local_whisper_installed(),
     })
 
 
@@ -389,6 +391,8 @@ async def sys_health():
         if ttype == "fast-whisper":
             whisper_info["downloaded"] = _check_whisper_model_exists(size, "whisper")
             whisper_info["checked"] = True
+            from app.services.optional_deps import is_local_whisper_installed
+            whisper_info["local_whisper_installed"] = is_local_whisper_installed()
         elif ttype == "mlx-whisper":
             whisper_info["downloaded"] = _check_mlx_whisper_model_exists(size)
             whisper_info["checked"] = True

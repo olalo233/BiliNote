@@ -1,5 +1,3 @@
-from faster_whisper import WhisperModel
-
 from app.decorators.timeit import timeit
 from app.models.transcriber_model import TranscriptSegment, TranscriptResult
 from app.transcriber.base import Transcriber
@@ -40,6 +38,9 @@ class WhisperTranscriber(Transcriber):
             compute_type: str = None,
             cpu_threads: int = 1,
     ):
+        from app.services.optional_deps import ensure_local_whisper
+
+        self._whisper_module = ensure_local_whisper()
         if device == 'cpu' or device is None:
             self.device = 'cpu'
         else:
@@ -59,12 +60,12 @@ class WhisperTranscriber(Transcriber):
             self._purge_cache(model_dir, model_size)
             self.model = self._build_model(model_size, model_dir)
 
-    def _build_model(self, model_size: str, model_dir: str) -> WhisperModel:
+    def _build_model(self, model_size: str, model_dir: str):
         # resolve 把模型名映射成可加载标识：内置 size→Systran repo_id、自定义映射、
         # 直通的 repo_id 或本地路径。faster-whisper 对本地目录走 os.path.isdir 分支，
         # 对 repo_id 走 download_model(cache_dir=download_root)，两者都吃 model_size_or_path。
         target = resolve_whisper_model(model_size)
-        return WhisperModel(
+        return self._whisper_module.WhisperModel(
             model_size_or_path=target,
             device=self.device,
             compute_type=self.compute_type,
@@ -154,4 +155,3 @@ class WhisperTranscriber(Transcriber):
         transcription_finished.send({
             "file_path": video_path,
         })
-
