@@ -502,6 +502,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
         onCopy={handleCopy}
         onDownload={handleDownload}
         createAt={createTime}
+        taskId={currentTask?.id}
         showTranscribe={showTranscribe}
         setShowTranscribe={setShowTranscribe}
         showChat={showChat}

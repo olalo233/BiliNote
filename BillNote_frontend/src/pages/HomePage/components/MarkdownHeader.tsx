@@ -1,11 +1,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Archive, Copy, Download, BrainCircuit, MessageSquare } from 'lucide-react'
+import { Archive, Copy, Download, BrainCircuit, Link2, MessageSquare } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Badge } from '@/components/ui/badge'
+import toast from 'react-hot-toast'
 
 interface VersionNote {
   ver_id: string
@@ -27,6 +28,8 @@ interface NoteHeaderProps {
   onCopy: () => void
   onDownload: () => void
   createAt?: string | Date
+  taskId?: string
+  showTranscribe: boolean
   setShowTranscribe: (show: boolean) => void
   showChat?: false | 'half' | 'full'
   setShowChat?: (mode: false | 'half' | 'full') => void
@@ -46,6 +49,7 @@ export function MarkdownHeader({
   onCopy,
   onDownload,
   createAt,
+  taskId,
   showTranscribe,
   setShowTranscribe,
   showChat,
@@ -69,11 +73,18 @@ export function MarkdownHeader({
     setCopied(true)
   }
 
-  const styleName = noteStyles.find(v => v.value === style)?.label || style
+  const handleCopyNoteLink = async () => {
+    if (!taskId) return
+    const url = `${window.location.origin}/note/${encodeURIComponent(taskId)}`
+    try {
+      await navigator.clipboard.writeText(url)
+      toast.success('链接已复制')
+    } catch {
+      toast.error('链接复制失败')
+    }
+  }
 
-  const reversedMarkdown: VersionNote[] = Array.isArray(currentTask?.markdown)
-    ? [...currentTask!.markdown].reverse()
-    : []
+  const styleName = noteStyles.find(v => v.value === style)?.label || style
 
   const formatDate = (date: string | Date | undefined) => {
     if (!date) return ''
@@ -106,7 +117,7 @@ export function MarkdownHeader({
             </SelectTrigger>
 
             <SelectContent>
-              {(currentTask?.markdown || []).map((v, idx) => {
+              {(currentTask?.markdown || []).map(v => {
                 const shortId = v.ver_id.slice(-6)
                 return (
                   <SelectItem key={v.ver_id} value={v.ver_id}>
@@ -174,6 +185,20 @@ export function MarkdownHeader({
             <TooltipContent>复制内容</TooltipContent>
           </Tooltip>
         </TooltipProvider>
+
+        {taskId && (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button onClick={handleCopyNoteLink} variant="ghost" size="sm" className="h-8 px-2">
+                  <Link2 className="mr-1.5 h-4 w-4" />
+                  <span className="text-sm">复制笔记链接</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>复制可直接打开这篇笔记的链接</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
 
         <TooltipProvider>
           <Tooltip>

@@ -33,6 +33,7 @@ const StorageSources = lazy(() => import('@/pages/SettingPage/StorageSources.tsx
 const StorageSourceForm = lazy(() => import('@/pages/SettingPage/StorageSourceForm.tsx'))
 const StorageFeature = lazy(() => import('@/pages/SettingPage/StorageFeature.tsx'))
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'))
+const NotePage = lazy(() => import('@/pages/NotePage.tsx'))
 
 function App() {
   useTaskPolling(3000) // 每 3 秒轮询一次
@@ -73,6 +74,14 @@ function App() {
         <Suspense fallback={<div className="flex h-screen items-center justify-center">加载中…</div>}>
           <Routes>
             <Route path="/onboarding" element={<Onboarding />} />
+            <Route
+              path="/note/:taskId"
+              element={
+                <OnboardingGuard>
+                  <NotePage />
+                </OnboardingGuard>
+              }
+            />
             <Route path="/" element={<OnboardingGuard><Index /></OnboardingGuard>}>
               <Route index element={<HomePage />} />
               <Route path="settings" element={<SettingPage />}>

@@ -45,3 +45,35 @@
 4. Clipper 模板剪藏一篇 → Obsidian 笔记属性里「bilinote 链接」为 `/note/{taskId}` 且可点开、
    「原文链接」为原视频 URL（截图 Obsidian 属性区）。
 5. `pnpm lint` + `pnpm build`；涉及后端则全量 pytest。
+
+## 最终 Web Clipper 模板 JSON
+
+仓库没有此前留存的 Clipper 模板文件，以下 JSON 可直接导入 Obsidian Web Clipper。
+其中「原文链接」保留原视频 URL，「bilinote 链接」抓取当前页面的 `/note/{taskId}` 深链。
+
+```json
+{
+  "schemaVersion": "0.1.0",
+  "name": "BiliNote 笔记",
+  "behavior": "create",
+  "noteContentFormat": "{{content}}\n\n---\n\n原文链接：{{selector:a[href^=\"http\"]?href}}\nbilinote 链接：{{url}}",
+  "properties": [
+    {
+      "name": "原文链接",
+      "value": "{{selector:a[href^=\"http\"]?href}}",
+      "type": "text"
+    },
+    {
+      "name": "bilinote 链接",
+      "value": "{{url}}",
+      "type": "text"
+    }
+  ],
+  "triggers": [],
+  "noteNameFormat": "{{title}}",
+  "path": "Clippings/BiliNote"
+}
+```
+
+使用时应从 BiliNote 的 `/note/{taskId}` 页面启动剪藏；原视频 URL 可按现有模板
+保留在「原文链接」属性中，`bilinote 链接` 则使用当前页面 URL。

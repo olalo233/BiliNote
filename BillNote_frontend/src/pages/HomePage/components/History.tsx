@@ -1,10 +1,16 @@
 import NoteHistory from '@/pages/HomePage/components/NoteHistory.tsx'
 import { useTaskStore } from '@/store/taskStore'
-import { Info, Clock, Loader2 } from 'lucide-react'
+import { Clock } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area.tsx'
+import { useNavigate } from 'react-router-dom'
 const History = () => {
   const currentTaskId = useTaskStore(state => state.currentTaskId)
   const setCurrentTask = useTaskStore(state => state.setCurrentTask)
+  const navigate = useNavigate()
+  const handleSelect = (taskId: string) => {
+    setCurrentTask(taskId)
+    navigate(`/note/${encodeURIComponent(taskId)}`)
+  }
   return (
     <>
       <div className={'flex h-full w-full flex-col gap-4 px-2.5 py-1.5'}>
@@ -15,7 +21,7 @@ const History = () => {
         </div>
         <ScrollArea className="w-full sm:h-[480px] md:h-[720px] lg:h-[92%]">
           {/*<div className="w-full flex-1 overflow-y-auto">*/}
-          <NoteHistory onSelect={setCurrentTask} selectedId={currentTaskId} />
+          <NoteHistory onSelect={handleSelect} selectedId={currentTaskId} />
           {/*</div>*/}
         </ScrollArea>
       </div>

@@ -270,6 +270,7 @@ const NoteForm = () => {
     }
     if (currentTaskId) {
       retryTask(currentTaskId, payload)
+      navigate(`/note/${encodeURIComponent(currentTaskId)}`)
       return
     }
 
@@ -277,6 +278,7 @@ const NoteForm = () => {
     try {
       const data = await generateNote(payload)
       addPendingTask(data.task_id, values.platform, payload)
+      navigate(`/note/${encodeURIComponent(data.task_id)}`)
     } catch (e: unknown) {
       // 就绪门禁：本地转写模型还没下载好。后端返回 reason='transcriber_model_not_ready'，
       // 引导用户去「设置 → 音频转写配置」下载，而不是留一个静默失败的任务。
