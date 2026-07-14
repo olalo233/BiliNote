@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 
 from app.routers import storage as storage_router
 from app.services import object_storage
@@ -137,6 +138,25 @@ def test_storage_source_routes_accept_minio_type_and_feature_scope(monkeypatch, 
     assert response_body(response)["data"]["name"] == "image-source"
     assert manager.get_source("image-source")["type"] == "minio"
     assert manager.get_source("image-source")["feature"] == "image_bed"
+
+
+def test_delete_storage_source_removes_unreferenced_source_and_protects_references(
+    monkeypatch, tmp_path
+):
+    manager = StorageConfigManager(str(tmp_path / "storage.json"))
+    manager.upsert_source("source", source_payload())
+    monkeypatch.setattr(storage_router, "storage_config_manager", manager)
+
+    deleted = storage_router.delete_storage_source("source")
+    assert response_body(deleted)["code"] == 0
+    assert manager.get_source("source") is None
+
+    manager.upsert_source("source", source_payload())
+    manager.update_feature("image_bed", {"enabled": True, "source": "source"})
+    with pytest.raises(HTTPException) as exc_info:
+        storage_router.delete_storage_source("source")
+    assert exc_info.value.status_code == 400
+    assert "正被功能引用" in str(exc_info.value.detail)
 
 
 def test_storage_test_uses_explicit_prefix_for_unbound_source(monkeypatch, tmp_path):
