@@ -53,3 +53,26 @@ def test_dict_snippets_still_supported():
     assert result.full_text == "legacy dict"
     assert result.segments[0].start == 1.0
     assert result.segments[0].end == 4.0
+
+
+def test_fetch_all_manual_skips_generated_tracks_and_keeps_other_languages():
+    def make_track(language_code, language, generated, text):
+        track = MagicMock()
+        track.language_code = language_code
+        track.language = language
+        track.is_generated = generated
+        track.fetch.return_value = [{"text": text, "start": 0, "duration": 1}]
+        return track
+
+    fetcher = YouTubeSubtitleFetcher()
+    fetcher._api = MagicMock()
+    manual_en = make_track("en", "English", False, "hello")
+    manual_zh = make_track("zh-Hans", "Chinese", False, "你好")
+    generated = make_track("de", "German", True, "hallo")
+    transcript_list = MagicMock()
+    transcript_list.__iter__ = lambda _self: iter([manual_en, generated, manual_zh])
+    fetcher._api.list.return_value = transcript_list
+
+    results = fetcher.fetch_all_manual("dummy")
+    assert [result.language for result in results] == ["en", "zh-Hans"]
+    assert results[1].full_text == "你好"

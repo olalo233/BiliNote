@@ -17,6 +17,7 @@ import {
   deleteResource,
   getResourcePack,
   presignResource,
+  subtitleVttUrl,
 } from '@/services/resourcePack'
 
 interface ResourcePackDialogProps {
@@ -55,6 +56,7 @@ function ResourcePackDialog({
   const [loading, setLoading] = useState(false)
   const [busyKey, setBusyKey] = useState<string | null>(null)
   const [playUrl, setPlayUrl] = useState<string | null>(null)
+  const [playLanguages, setPlayLanguages] = useState<string[]>([])
   const [imageBaseUrl, setImageBaseUrl] = useState('')
 
   const loadPack = useCallback(async () => {
@@ -77,17 +79,29 @@ function ResourcePackDialog({
   useEffect(() => {
     if (!open) return
     setPlayUrl(null)
+    setPlayLanguages([])
     void loadPack()
   }, [open, loadPack])
 
   const itemsByKind = useMemo(() => new Map(items.map(item => [item.kind, item])), [items])
 
-  const getUrl = async (key: string, forPlayback = false) => {
+  const hasRunningArchive = items.some(item =>
+    item.archive_status?.state === 'pending' || item.archive_status?.state === 'running'
+  )
+
+  useEffect(() => {
+    if (!open || !hasRunningArchive) return
+    const timer = window.setTimeout(() => void loadPack(), 5000)
+    return () => window.clearTimeout(timer)
+  }, [open, hasRunningArchive, loadPack])
+
+  const getUrl = async (key: string, forPlayback = false, languages: string[] = []) => {
     setBusyKey(key)
     try {
       const result = await presignResource(key)
       if (forPlayback) {
         setPlayUrl(result.url)
+        setPlayLanguages(languages)
       } else {
         window.open(result.url, '_blank', 'noopener,noreferrer')
       }
@@ -114,7 +128,7 @@ function ResourcePackDialog({
   }
 
   const archive = async (item: ResourceItem) => {
-    if (item.kind !== 'video' && item.kind !== 'audio') return
+    if (!['video', 'audio', 'subtitle', 'transcript'].includes(item.kind)) return
     setBusyKey(item.kind)
     try {
       await archiveResource({
@@ -156,14 +170,37 @@ function ResourcePackDialog({
     }
 
     const actions = []
-    if (item.archived && item.key) {
+    const archiveState = item.archive_status?.state
+    const isArchiving = archiveState === 'pending' || archiveState === 'running'
+    const isFailed = archiveState === 'failed'
+    if (isFailed) {
+      actions.push(
+        <Button
+          key="retry"
+          variant="outline"
+          size="sm"
+          onClick={() => void archive(item)}
+          disabled={busyKey === item.kind}
+        >
+          {busyKey === item.kind ? (
+            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <RefreshCw className="mr-1 h-3.5 w-3.5" />
+          )}
+          重试
+        </Button>
+      )
+    }
+    if (!isArchiving && item.archived && item.key) {
       if (item.kind === 'video') {
         actions.push(
           <Button
             key="play"
             variant="ghost"
             size="sm"
-            onClick={() => void getUrl(item.key!, true)}
+            onClick={() =>
+              void getUrl(item.key!, true, itemsByKind.get('subtitle')?.languages || [])
+            }
             disabled={busyKey === item.key}
           >
             <Play className="mr-1 h-3.5 w-3.5" />
@@ -198,7 +235,7 @@ function ResourcePackDialog({
           </Button>
         )
       }
-    } else if (item.local && (item.kind === 'video' || item.kind === 'audio')) {
+    } else if (!isArchiving && item.local && (item.kind === 'video' || item.kind === 'audio')) {
       actions.push(
         <Button
           key="upload"
@@ -254,11 +291,22 @@ function ResourcePackDialog({
                   local: false,
                   size: 0,
                 }
+                const archiveState = item.archive_status?.state
+                const archiveError = item.archive_status?.error
                 return (
                   <div key={kind} className="flex flex-wrap items-center gap-3 px-4 py-3">
                     <div className="min-w-24 font-medium">{labels[kind]}</div>
                     <div className="text-muted-foreground text-sm">
-                      {item.archived
+                      {archiveState === 'pending' || archiveState === 'running' ? (
+                        <span className="inline-flex items-center gap-1">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          归档中
+                        </span>
+                      ) : archiveState === 'failed' ? (
+                        <span className="text-red-600" title={archiveError}>
+                          归档失败{archiveError ? `：${archiveError}` : ''}
+                        </span>
+                      ) : item.archived
                         ? `已归档 · ${formatSize(item.size)}`
                         : item.local
                           ? '本地可用 · 未归档'
@@ -279,7 +327,24 @@ function ResourcePackDialog({
         {playUrl && (
           <div className="space-y-2 rounded-md border bg-slate-50 p-3">
             <div className="text-sm font-medium">原始视频预览</div>
-            <video className="max-h-80 w-full rounded" controls src={playUrl} preload="metadata" />
+            <video
+              className="max-h-80 w-full rounded"
+              controls
+              crossOrigin="anonymous"
+              src={playUrl}
+              preload="metadata"
+            >
+              {playLanguages.map((lang, index) => (
+                <track
+                  key={lang}
+                  kind="subtitles"
+                  srcLang={lang}
+                  label={lang}
+                  src={subtitleVttUrl(platform, videoId, lang)}
+                  default={index === 0}
+                />
+              ))}
+            </video>
           </div>
         )}
       </DialogContent>

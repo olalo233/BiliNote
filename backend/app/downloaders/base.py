@@ -13,6 +13,14 @@ QUALITY_MAP = {
     "slow": "128"
 }
 
+# Keep archived videos playable in Safari and other clients that do not decode
+# AV1 reliably.  The final fallbacks intentionally preserve the old behaviour:
+# a source without an H.264 stream should still be downloadable.
+PLAYABLE_VIDEO_FORMAT = (
+    "bestvideo[vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/"
+    "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+)
+
 
 class Downloader(ABC):
     def __init__(self):

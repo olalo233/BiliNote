@@ -3,7 +3,7 @@
     <p align="center">
   <img src="./doc/icon.svg" alt="BiliNote Banner" width="50" height="50"  />
 </p>
-<h1 align="center" > BiliNote v2.5.0-ex</h1>
+<h1 align="center" > BiliNote v2.5.1-ex</h1>
 </div>
 
 <p align="center"><i>AI 视频笔记生成工具 让 AI 为你的视频做笔记</i></p>
@@ -105,6 +105,12 @@ BiliNote 是一个开源的 AI 视频笔记助手，支持通过哔哩哔哩、Y
 - 「图床设置」和「资产设置」分别维护供应商列表；添加供应商后再进入对应功能详情，不混用两套配置。
 - 图床上传截图到 `img` 等公开桶；资产归档写入 `bilinote-assets` 等私有桶，资源包访问使用预签名 URL。
 - 资产归档不阻塞笔记主链路；设置页可以测试连接、查看用量、刷新缓存，并按对象类型查看明细。
+
+### v2.5.1-ex 修复
+
+- 资源包透出异步归档状态，归档中的视频自动刷新，失败时显示原因并支持重试。
+- 修复转写缓存与资产还原丢失字幕 `raw` 字段导致字幕不归档的问题，并降低预期 NoSuchKey 日志噪声。
+- 归档视频优先选择 H.264（avc1），资源包播放器支持 HTTPS 同源多语字幕轨道。
 
 ### v2.2.3 修订
 
@@ -210,27 +216,27 @@ docker run -d -p 80:80 \
   "sources": {
     "minio-img": {
       "type": "minio",
-      "endpoint": "img.expii.top:9000",
+      "endpoint": "s3.expii.top",
       "access_key": "YOUR_ACCESS_KEY",
       "secret_key": "YOUR_SECRET_KEY",
       "bucket": "img",
       "path_style": true,
-      "use_ssl": false
+      "use_ssl": true
     },
     "minio-assets": {
       "type": "minio",
-      "endpoint": "img.expii.top:9000",
+      "endpoint": "s3.expii.top",
       "access_key": "YOUR_ACCESS_KEY",
       "secret_key": "YOUR_SECRET_KEY",
       "bucket": "bilinote-assets",
       "path_style": true,
-      "use_ssl": false
+      "use_ssl": true
     }
   },
   "image_bed": {
     "enabled": true,
     "source": "minio-img",
-    "public_base_url": "http://img.expii.top:9000/img",
+    "public_base_url": "https://s3.expii.top/img",
     "path_prefix": "bilinote"
   },
   "assets": {
@@ -239,6 +245,8 @@ docker run -d -p 80:80 \
   }
 }
 ```
+
+上述 HTTPS 入口适用于公网页面与浏览器播放；旧的 `img/minio.expii.top:9000` HTTP 直连入口仍可用于纯内网 HTTP 场景。
 
 `img` 桶中图床使用的路径需要允许匿名读取；`bilinote-assets` 应保持私有，资源包通过后端生成的预签名 URL 访问。生产环境建议为两个桶建立最小权限 access key，并在 Zspace/NAS 上只通过配置卷注入 secret。
 

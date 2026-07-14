@@ -126,3 +126,81 @@ def test_delete_resource_uses_only_assets_source(tmp_path, monkeypatch):
 
     assert response_body(response)["code"] == 0
     assert deleted == [("assets", "youtube/abc/audio.m4a")]
+
+
+def test_resource_pack_exposes_archive_status_and_subtitle_languages(tmp_path, monkeypatch):
+    manager = configured_manager(tmp_path)
+    monkeypatch.setattr(storage_router, "storage_config_manager", manager)
+    monkeypatch.setattr(storage_router, "get_tasks_by_video", lambda *_args: [])
+    monkeypatch.setattr(
+        storage_router,
+        "get_archive_status",
+        lambda _platform, _video_id: {
+            "video": {"state": "running", "updated_at": "2026-07-14T00:00:00+00:00"},
+            "subtitle": {
+                "state": "failed",
+                "error": "credential rejected",
+                "updated_at": "2026-07-14T00:00:01+00:00",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        storage_router.object_storage,
+        "list_objects",
+        lambda *_args: [
+            ObjectInfo("youtube/abc/subtitle.en-US.json", 10),
+            ObjectInfo("youtube/abc/subtitle.zh-Hans.json", 12),
+        ],
+    )
+
+    body = response_body(storage_router.get_resource_pack("youtube", "abc"))
+    items = {item["kind"]: item for item in body["data"]["items"]}
+    assert items["video"]["archive_status"]["state"] == "running"
+    assert items["subtitle"]["languages"] == ["en-US", "zh-Hans"]
+    assert items["subtitle"]["archive_status"]["error"] == "credential rejected"
+
+
+def test_subtitle_vtt_formats_unicode_multiline_and_escaped_text(tmp_path, monkeypatch):
+    manager = configured_manager(tmp_path)
+    monkeypatch.setattr(storage_router, "storage_config_manager", manager)
+    monkeypatch.setattr(
+        storage_router.object_storage,
+        "get_bytes",
+        lambda _source, _key: json.dumps(
+            {
+                "segments": [
+                    {"start": 0, "end": 1.234, "text": "你好\n第二行 <tag> &"},
+                    {"start": 3661.5, "end": 3662, "text": "later"},
+                ]
+            },
+            ensure_ascii=False,
+        ).encode("utf-8"),
+    )
+
+    response = storage_router.get_subtitle_vtt("youtube", "abc", "zh-Hans")
+    assert response.media_type == "text/vtt"
+    assert response.body.decode("utf-8") == (
+        "WEBVTT\n\n"
+        "1\n00:00:00.000 --> 00:00:01.234\n你好\n第二行 &lt;tag&gt; &amp;\n\n"
+        "2\n01:01:01.500 --> 01:01:02.000\nlater\n"
+    )
+
+
+def test_subtitle_vtt_rejects_missing_language_and_path_traversal(tmp_path, monkeypatch):
+    manager = configured_manager(tmp_path)
+    monkeypatch.setattr(storage_router, "storage_config_manager", manager)
+
+    with pytest.raises(HTTPException) as traversal:
+        storage_router.get_subtitle_vtt("youtube", "abc", "../secret")
+    assert traversal.value.status_code == 400
+
+    monkeypatch.setattr(
+        storage_router.object_storage,
+        "get_bytes",
+        lambda *_args: (_ for _ in ()).throw(
+            storage_router.ObjectStorageError("assets", "youtube/abc/subtitle.fr.json", "NoSuchKey")
+        ),
+    )
+    with pytest.raises(HTTPException) as missing:
+        storage_router.get_subtitle_vtt("youtube", "abc", "fr")
+    assert missing.value.status_code == 404

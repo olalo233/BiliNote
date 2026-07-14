@@ -2,6 +2,16 @@
 
 本项目所有重要变更记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [2.5.1-ex] - 2026-07-14
+
+### Fixed
+
+- 资源包透出异步归档状态，面板显示归档中、失败原因并支持自动刷新与重试。
+- 修复转写缓存和资产还原丢失 `raw` 字段导致字幕不归档的问题。
+- 归档视频优先选择 H.264（avc1），并为 YouTube 归档所有人工字幕轨与选中字幕轨。
+- 新增资源包 WebVTT 端点和播放器原生多语言 `<track>` 挂载，避免字幕播放跨域与 mixed content 问题。
+- 预期的对象不存在检查改为 debug 日志，其他对象存储错误继续保留 traceback。
+
 ## [2.5.0-ex] - 2026-07-13
 
 ### Added
