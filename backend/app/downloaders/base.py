@@ -13,13 +13,9 @@ QUALITY_MAP = {
     "slow": "128"
 }
 
-# Keep archived videos playable in Safari and other clients that do not decode
-# AV1 reliably.  The final fallbacks intentionally preserve the old behaviour:
-# a source without an H.264 stream should still be downloadable.
-PLAYABLE_VIDEO_FORMAT = (
-    "bestvideo[vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/"
-    "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
-)
+# 归档视频取源站最佳编码（YouTube 高分辨率通常是 av1，压缩比优于 h264），
+# 不强制 h264：现代浏览器均可解 av1-in-mp4，播放走 best-effort（不可解时露下载按钮）。
+# 各平台格式串在各自 downloader 里，因平台可用编码/容器不同，不做统一。
 
 
 class Downloader(ABC):
