@@ -13,6 +13,10 @@ QUALITY_MAP = {
     "slow": "128"
 }
 
+# 归档视频取源站最佳编码（YouTube 高分辨率通常是 av1，压缩比优于 h264），
+# 不强制 h264：现代浏览器均可解 av1-in-mp4，播放走 best-effort（不可解时露下载按钮）。
+# 各平台格式串在各自 downloader 里，因平台可用编码/容器不同，不做统一。
+
 
 class Downloader(ABC):
     def __init__(self):

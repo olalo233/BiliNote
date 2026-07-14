@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 import uuid
 import json
+import html
 import logging
 import os
 import re
@@ -14,10 +15,11 @@ from typing import Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app.services import object_storage
-from app.services.asset_archive import enqueue_archive
+from app.services.asset_archive import asset_key, enqueue_archive, get_archive_status
 from app.services.object_storage import ObjectStorageError
 from app.services.storage_config_manager import StorageConfigManager, storage_config_manager
 from app.db.video_task_dao import get_task_by_video, get_tasks_by_video
@@ -258,6 +260,7 @@ def get_storage_usage(feature: str, refresh: bool = False):
 _ASSET_FILENAME_RE = re.compile(
     r"^(?:video\.mp4|audio\.[A-Za-z0-9]+|transcript\.json|subtitle\.[^/]+\.json)$"
 )
+_SUBTITLE_LANG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
 
 def _validate_asset_key(key: str) -> str:
@@ -313,6 +316,7 @@ def _resource_items(platform: str, video_id: str) -> list[dict[str, object]]:
         "subtitle": [],
         "transcript": [],
     }
+    archive_status = get_archive_status(platform, video_id)
 
     asset_config = _manager().get_effective_feature("assets")
     if asset_config.get("enabled"):
@@ -335,16 +339,26 @@ def _resource_items(platform: str, video_id: str) -> list[dict[str, object]]:
     labels = ("video", "audio", "subtitle", "transcript")
     for kind in labels:
         objects = archived[kind]
-        items.append(
-            {
-                "kind": kind,
-                "archived": bool(objects),
-                "local": bool(local[kind]),
-                "size": sum(item.size for item in objects),
-                "key": objects[0].key if objects else None,
-                "count": len(objects) if kind == "subtitle" else (1 if objects else 0),
-            }
-        )
+        item: dict[str, object] = {
+            "kind": kind,
+            "archived": bool(objects),
+            "local": bool(local[kind]),
+            "size": sum(item.size for item in objects),
+            "key": objects[0].key if objects else None,
+            "count": len(objects) if kind == "subtitle" else (1 if objects else 0),
+        }
+        if kind == "subtitle":
+            languages = []
+            for object_info in objects:
+                filename = Path(object_info.key).name
+                if filename.startswith("subtitle.") and filename.endswith(".json"):
+                    language = filename[len("subtitle.") : -len(".json")]
+                    if language:
+                        languages.append(language)
+            item["languages"] = sorted(set(languages))
+        if kind in archive_status:
+            item["archive_status"] = archive_status[kind]
+        items.append(item)
 
     image_count = 0
     image_size = 0
@@ -383,6 +397,64 @@ def get_resource_pack(platform: str, video_id: str):
             "items": _resource_items(platform, video_id),
         }
     )
+
+
+def _validate_subtitle_language(lang: str) -> str:
+    normalized = str(lang or "")
+    if not _SUBTITLE_LANG_RE.fullmatch(normalized):
+        raise HTTPException(status_code=400, detail="非法字幕语言参数")
+    return normalized
+
+
+def _vtt_timestamp(seconds: object) -> str:
+    try:
+        milliseconds = max(0, round(float(seconds) * 1000))
+    except (TypeError, ValueError):
+        milliseconds = 0
+    hours, remainder = divmod(milliseconds, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    seconds_part, millis = divmod(remainder, 1000)
+    return f"{hours:02d}:{minutes:02d}:{seconds_part:02d}.{millis:03d}"
+
+
+def _transcript_to_vtt(raw: dict[str, object]) -> str:
+    cues: list[str] = []
+    for segment in raw.get("segments", []) or []:
+        if not isinstance(segment, dict):
+            continue
+        try:
+            start = max(0, float(segment.get("start", 0) or 0))
+            end = max(start + 0.001, float(segment.get("end", start) or start))
+        except (TypeError, ValueError):
+            continue
+        text = html.escape(str(segment.get("text", "") or ""), quote=False)
+        if not text:
+            continue
+        index = len(cues) + 1
+        cues.append(
+            f"{index}\n{_vtt_timestamp(start)} --> {_vtt_timestamp(end)}\n{text}"
+        )
+    return "WEBVTT\n\n" + "\n\n".join(cues) + "\n"
+
+
+@router.get("/resource_pack/subtitle_vtt/{platform}/{video_id}/{lang}")
+def get_subtitle_vtt(platform: str, video_id: str, lang: str):
+    if any(not value or value in {".", ".."} or "/" in value for value in (platform, video_id)):
+        raise HTTPException(status_code=400, detail="非法资源路径")
+    language = _validate_subtitle_language(lang)
+    config = _manager().get_effective_feature("assets")
+    if not config.get("enabled"):
+        raise HTTPException(status_code=404, detail="资产功能未启用")
+    source = str(config.get("source") or "")
+    key = asset_key(platform, video_id, f"subtitle.{language}.json")
+    try:
+        payload = object_storage.get_bytes(source, key)
+        raw = json.loads(payload.decode("utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError("字幕对象格式无效")
+    except (ObjectStorageError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=f"字幕不存在或格式无效: {exc}") from exc
+    return Response(content=_transcript_to_vtt(raw), media_type="text/vtt")
 
 
 @router.get("/resource_pack/presign")

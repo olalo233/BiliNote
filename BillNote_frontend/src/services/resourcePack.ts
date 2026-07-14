@@ -10,6 +10,12 @@ export interface ResourceItem {
   key?: string | null
   count?: number
   keys?: string[]
+  languages?: string[]
+  archive_status?: {
+    state: 'pending' | 'running' | 'done' | 'failed' | 'skipped'
+    error?: string
+    updated_at: string
+  }
 }
 
 export interface ResourcePack {
@@ -49,3 +55,8 @@ export const archiveResource = (
   payload: ResourceArchivePayload
 ): Promise<{ task_id: string; queued: boolean }> =>
   request.post('/resource_pack/archive', payload, { suppressToast: true })
+
+export const subtitleVttUrl = (platform: string, videoId: string, lang: string): string => {
+  const apiBase = String(import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
+  return `${apiBase}/resource_pack/subtitle_vtt/${encodeURIComponent(platform)}/${encodeURIComponent(videoId)}/${encodeURIComponent(lang)}`
+}

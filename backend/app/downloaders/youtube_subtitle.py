@@ -34,6 +34,72 @@ class YouTubeSubtitleFetcher:
         else:
             self._api = YouTubeTranscriptApi()
 
+    def _fetch_track(self, transcript) -> Optional[TranscriptResult]:
+        """Fetch one track and normalize both supported API result shapes."""
+        fetched = transcript.fetch()
+        segments = []
+        for snippet in fetched:
+            # youtube-transcript-api >=1.0 returns FetchedTranscriptSnippet
+            # objects; older versions return dictionaries.
+            if isinstance(snippet, dict):
+                text = (snippet.get("text") or "").strip()
+                start = snippet.get("start", 0)
+                duration = snippet.get("duration", 0)
+            else:
+                text = (getattr(snippet, "text", "") or "").strip()
+                start = getattr(snippet, "start", 0)
+                duration = getattr(snippet, "duration", 0)
+            if not text:
+                continue
+            segments.append(
+                TranscriptSegment(
+                    start=float(start),
+                    end=float(start) + float(duration),
+                    text=text,
+                )
+            )
+
+        if not segments:
+            return None
+
+        return TranscriptResult(
+            language=transcript.language_code,
+            full_text=" ".join(segment.text for segment in segments),
+            segments=segments,
+            raw={
+                "source": "youtube_transcript_api",
+                "language": transcript.language,
+                "language_code": transcript.language_code,
+                "is_generated": bool(transcript.is_generated),
+            },
+        )
+
+    def fetch_all_manual(self, video_id: str) -> List[TranscriptResult]:
+        """Fetch every manual track, isolating failures to one language."""
+        try:
+            transcript_list = self._api.list(video_id)
+        except Exception as exc:
+            logger.warning(f"YouTube 人工字幕列表获取失败 video_id={video_id}: {exc}")
+            return []
+
+        results: List[TranscriptResult] = []
+        for transcript in transcript_list:
+            if getattr(transcript, "is_generated", False):
+                continue
+            language_code = getattr(transcript, "language_code", "")
+            try:
+                result = self._fetch_track(transcript)
+                if result:
+                    results.append(result)
+                    logger.info(f"归档人工字幕轨道: {language_code}")
+                else:
+                    logger.warning(f"YouTube 人工字幕内容为空 video_id={video_id} lang={language_code}")
+            except Exception as exc:
+                logger.warning(
+                    f"YouTube 人工字幕轨道获取失败 video_id={video_id} lang={language_code}: {exc}"
+                )
+        return results
+
     def fetch_subtitles(
         self,
         video_id: str,
@@ -75,46 +141,12 @@ class YouTubeSubtitleFetcher:
                 return None
 
             # 3. 获取字幕内容
-            fetched = transcript.fetch()
-            segments = []
-            for snippet in fetched:
-                # youtube-transcript-api >=1.0 返回 FetchedTranscriptSnippet 对象
-                # （属性 text/start/duration），旧版本返回 dict。禁止 str(snippet) 兜底——
-                # 那会把对象 repr 当字幕文本写进笔记（曾产出整篇 FetchedTranscriptSnippet(...) 垃圾）。
-                if isinstance(snippet, dict):
-                    text = (snippet.get("text") or "").strip()
-                    start = snippet.get("start", 0)
-                    duration = snippet.get("duration", 0)
-                else:
-                    text = (getattr(snippet, "text", "") or "").strip()
-                    start = getattr(snippet, "start", 0)
-                    duration = getattr(snippet, "duration", 0)
-                if not text:
-                    continue
-                segments.append(TranscriptSegment(
-                    start=float(start),
-                    end=float(start) + float(duration),
-                    text=text,
-                ))
-
-            if not segments:
+            result = self._fetch_track(transcript)
+            if not result:
                 logger.warning(f"YouTube 字幕内容为空: {video_id}")
                 return None
-
-            full_text = " ".join(seg.text for seg in segments)
-            logger.info(f"成功获取 YouTube 字幕，共 {len(segments)} 段")
-
-            return TranscriptResult(
-                language=transcript.language_code,
-                full_text=full_text,
-                segments=segments,
-                raw={
-                    "source": "youtube_transcript_api",
-                    "language": transcript.language,
-                    "language_code": transcript.language_code,
-                    "is_generated": transcript.is_generated,
-                },
-            )
+            logger.info(f"成功获取 YouTube 字幕，共 {len(result.segments)} 段")
+            return result
 
         except Exception as e:
             logger.warning(f"YouTube 字幕获取失败: {e}")

@@ -32,6 +32,13 @@ class ObjectInfo:
     content_type: str | None = None
 
 
+def _is_missing_object_error(exc: Exception) -> bool:
+    """Recognize the SDK's normal 404/NoSuchKey stat response."""
+    code = str(getattr(exc, "code", "") or "")
+    status_code = getattr(exc, "status_code", None)
+    return code in {"NoSuchKey", "NoSuchObject", "NotFound"} or status_code == 404
+
+
 def _source(source_name: str, manager: StorageConfigManager | None = None) -> dict[str, Any]:
     source = (manager or storage_config_manager).get_source(source_name)
     if not source:
@@ -118,7 +125,12 @@ def stat_object(source: str, key: str) -> ObjectInfo:
     except ObjectStorageError:
         raise
     except Exception as exc:
-        logger.exception("对象查询失败 source=%s key=%s", source, key)
+        if _is_missing_object_error(exc):
+            # stat_object is commonly used as an idempotent existence check
+            # before upload. Missing is expected and should not print a stack.
+            logger.debug("对象不存在，按预期跳过查询 source=%s key=%s", source, key)
+        else:
+            logger.warning("对象查询失败 source=%s key=%s", source, key, exc_info=True)
         raise ObjectStorageError(source, key, str(exc)) from exc
 
 

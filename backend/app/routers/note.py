@@ -104,6 +104,9 @@ def _persist_prefetched_transcript(task_id: str, transcript: dict) -> None:
         "language": transcript.get("language") or "zh",
         "full_text": full_text,
         "segments": cleaned_segments,
+        # Keep the cache distinguishable from an audio-only transcription so
+        # the asynchronous archive can restore the subtitle track on reruns.
+        "raw": transcript.get("raw") or {"source": "prefetched"},
     }
 
     os.makedirs(NOTE_OUTPUT_DIR, exist_ok=True)

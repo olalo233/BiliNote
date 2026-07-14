@@ -85,6 +85,24 @@ def test_object_storage_wraps_sdk_errors_with_source_and_key(monkeypatch, tmp_pa
         object_storage.put_file("broken", "folder/one.txt", local_file, "text/plain")
 
 
+def test_stat_missing_object_is_debug_without_traceback(monkeypatch, caplog):
+    class MissingClient:
+        def stat_object(self, *_args):
+            error = RuntimeError("object missing")
+            error.code = "NoSuchKey"
+            raise error
+
+    monkeypatch.setattr(object_storage, "get_client", lambda *_args: MissingClient())
+    monkeypatch.setattr(object_storage, "_bucket", lambda *_args: "bucket")
+
+    with caplog.at_level("DEBUG"):
+        with pytest.raises(ObjectStorageError):
+            object_storage.stat_object("assets", "youtube/abc/missing.json")
+
+    assert "对象不存在，按预期跳过查询" in caplog.text
+    assert "Traceback" not in caplog.text
+
+
 def test_storage_source_routes_mask_and_retain_secret(monkeypatch, tmp_path):
     manager = StorageConfigManager(str(tmp_path / "storage.json"))
     monkeypatch.setattr(storage_router, "storage_config_manager", manager)

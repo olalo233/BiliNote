@@ -166,6 +166,7 @@ class NoteGenerator:
                         language=data.get("language"),
                         full_text=data["full_text"],
                         segments=segments,
+                        raw=data.get("raw"),
                     )
                     logger.info(f"已从缓存加载转写结果，共 {len(segments)} 段")
                 except Exception as e:
@@ -578,7 +579,12 @@ class NoteGenerator:
             try:
                 data = json.loads(transcript_cache_file.read_text(encoding="utf-8"))
                 segments = [TranscriptSegment(**seg) for seg in data.get("segments", [])]
-                return TranscriptResult(language=data.get("language"), full_text=data["full_text"], segments=segments)
+                return TranscriptResult(
+                    language=data.get("language"),
+                    full_text=data["full_text"],
+                    segments=segments,
+                    raw=data.get("raw"),
+                )
             except Exception as e:
                 logger.warning(f"加载转写缓存失败，将重新获取：{e}")
 
@@ -630,7 +636,12 @@ class NoteGenerator:
             try:
                 data = json.loads(transcript_cache_file.read_text(encoding="utf-8"))
                 segments = [TranscriptSegment(**seg) for seg in data.get("segments", [])]
-                return TranscriptResult(language=data["language"], full_text=data["full_text"], segments=segments)
+                return TranscriptResult(
+                    language=data.get("language"),
+                    full_text=data["full_text"],
+                    segments=segments,
+                    raw=data.get("raw"),
+                )
             except Exception as e:
                 logger.warning(f"加载转写缓存失败，将重新转写：{e}")
 
