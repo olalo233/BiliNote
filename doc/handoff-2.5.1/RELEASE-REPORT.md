@@ -50,5 +50,5 @@ passed
 - annotated tag `v2.5.1-ex.2` 已推送，远端 tag 指向上述 commit。
 - [Docker 发布 workflow #29303598667](https://github.com/olalo233/BiliNote/actions/runs/29303598667) 已成功完成镜像构建、smoke test、verified image push 和 usage instructions。
 - [Commit Lint #28](https://github.com/olalo233/BiliNote/actions/runs/29303598136) 已通过。
-- [PR #2](https://github.com/olalo233/BiliNote/pull/2) 为 `fix/2.5.1-playback` → `master` 的交付 PR。
+- [PR #2](https://github.com/olalo233/BiliNote/pull/2) 已将 `fix/2.5.1-playback` 合并至 `master`，merge commit 为 `840daf3c5c28b3f7bfdc147608b100f4dfef43d8`。
 - 自动触发的 Claude PR workflow 已在 `b58aa75` 移除；历史 Claude 失败 run 不再复现。
