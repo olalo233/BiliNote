@@ -45,4 +45,10 @@ failed on the repository baseline: 115 errors and 16 warnings; the two changed f
 2. 设置页两个存储源使用 endpoint `s3.expii.top`、启用 SSL；图床 `public_base_url` 使用 `https://s3.expii.top/img`，分别测试连接。
 3. 旧 AV1 归档如需 Safari 播放：资源包删除旧视频后重新勾选归档。
 
-本地 bugfix commit 已标记 annotated tag `v2.5.1-ex`；发布镜像、CI run 链接和 NAS 录屏需在完成部署验证后补入本报告，当前尚未执行 push。
+## 已执行的远端发布动作
+
+- commit `3a7163e84d88883800b7af456753ac5b6c36115c` 已推送到 `fix/2.5.1-playback`。
+- annotated tag `v2.5.1-ex` 已推送，远端 tag 指向上述 commit。
+- 已创建 [draft PR #2](https://github.com/olalo233/BiliNote/pull/2)，目标为 `master`。
+- GitHub Actions： [Commit Lint #24](https://github.com/olalo233/BiliNote/actions/runs/29301089718) 已通过； [Claude Code Review #6](https://github.com/olalo233/BiliNote/actions/runs/29301089735) 因 workflow 未提供 `ANTHROPIC_API_KEY`、`CLAUDE_CODE_OAUTH_TOKEN` 或 federation 配置而失败，不能归因于代码测试失败。
+- 发布镜像、真实 NAS/S3 验证和浏览器录屏仍未执行；本报告不把本地构建或合成媒体当作这些证据。
