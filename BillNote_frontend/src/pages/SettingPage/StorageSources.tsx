@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Database, Plus } from 'lucide-react'
+import { Database, Plus, Trash2 } from 'lucide-react'
 import { useLocation, useNavigate, useParams, Outlet } from 'react-router-dom'
 import { toast } from 'react-hot-toast'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import {
   getStorageConfig,
+  deleteStorageSource,
   saveStorageFeature,
   StorageConfig,
   StorageFeature,
@@ -98,6 +99,26 @@ export default function StorageSources({ feature }: StorageSourcesProps) {
     }
   }
 
+  const handleDelete = async (name: string) => {
+    if (!window.confirm(`确定删除存储供应商「${name}」吗？`)) return
+    try {
+      await deleteStorageSource(name)
+      if (sourceName === name) navigate(basePath)
+      await loadConfig()
+      toast.success('已删除')
+    } catch (error: unknown) {
+      const message =
+        typeof error === 'object' && error !== null
+          ? 'detail' in error && typeof error.detail === 'string'
+            ? error.detail
+            : 'msg' in error && typeof error.msg === 'string'
+              ? error.msg
+              : undefined
+          : undefined
+      toast.error(message || '删除失败')
+    }
+  }
+
   return (
     <div className="flex h-full min-h-0 bg-white">
       <div className="flex-1/5 min-h-0 overflow-y-auto border-r border-neutral-200 p-2">
@@ -134,12 +155,24 @@ export default function StorageSources({ feature }: StorageSourcesProps) {
                       </div>
                     </div>
                     <div onClick={event => event.stopPropagation()}>
-                      <Switch
-                        checked={Boolean(enabled)}
-                        disabled={toggling === name}
-                        onCheckedChange={checked => void handleToggle(name, checked)}
-                        aria-label={`启用${name}`}
-                      />
+                      <div className="flex items-center gap-1">
+                        <Switch
+                          checked={Boolean(enabled)}
+                          disabled={toggling === name}
+                          onCheckedChange={checked => void handleToggle(name, checked)}
+                          aria-label={`启用${name}`}
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="text-destructive"
+                          aria-label={`删除${name}`}
+                          onClick={() => void handleDelete(name)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 )
