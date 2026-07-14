@@ -51,4 +51,6 @@ failed on the repository baseline: 115 errors and 16 warnings; the two changed f
 - annotated tag `v2.5.1-ex` 已推送，远端 tag 指向上述 commit。
 - 已创建 [draft PR #2](https://github.com/olalo233/BiliNote/pull/2)，目标为 `master`。
 - GitHub Actions： [Commit Lint #24](https://github.com/olalo233/BiliNote/actions/runs/29301089718) 已通过； [Claude Code Review #6](https://github.com/olalo233/BiliNote/actions/runs/29301089735) 因 workflow 未提供 `ANTHROPIC_API_KEY`、`CLAUDE_CODE_OAUTH_TOKEN` 或 federation 配置而失败，不能归因于代码测试失败。
-- 发布镜像、真实 NAS/S3 验证和浏览器录屏仍未执行；本报告不把本地构建或合成媒体当作这些证据。
+- [Docker 发布 workflow #29301062939](https://github.com/olalo233/BiliNote/actions/runs/29301062939) 已成功完成镜像构建、smoke test、verified image push 和 usage instructions；tag 产物包括 `ghcr.io/olalo233/bilinote:2.5.1-ex` 与 `ghcr.io/olalo233/bilinote:latest`。
+- 自动触发的 Claude PR workflow 已在 `b58aa75` 移除；该提交的新 PR run 只有 [Commit Lint #26](https://github.com/olalo233/BiliNote/actions/runs/29301494224)，已通过。上面的 Claude #6 是历史失败记录，之后未再触发。
+- 真实 NAS/S3 验证和浏览器录屏仍未执行；本报告不把本地构建、Docker smoke test 或合成媒体当作这些部署环境证据。
