@@ -7,12 +7,12 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form.tsx'
-import { useEffect,useState } from 'react'
-import { useForm, useWatch } from 'react-hook-form'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useForm, useWatch, type FieldErrors } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 
-import { Info, Loader2, Plus } from 'lucide-react'
+import { Info, Loader2, Plus, Search, Trash2, X } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert.tsx'
 import { generateNote } from '@/services/note.ts'
 import { getStorageConfig } from '@/services/storage.ts'
@@ -38,7 +38,7 @@ import {
 import { Input } from '@/components/ui/input.tsx'
 import { Textarea } from '@/components/ui/textarea.tsx'
 import { noteStyles, noteFormats, videoPlatforms } from '@/constant/note.ts'
-import { fetchModels } from '@/services/model.ts'
+import { deletePrompt, getPrompts, savePrompt, type PromptTemplate } from '@/services/prompt.ts'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 
@@ -135,10 +135,17 @@ const NoteForm = () => {
   const [isUploading, setIsUploading] = useState(false)
   const [uploadSuccess, setUploadSuccess] = useState(false)
   const [assetsEnabled, setAssetsEnabled] = useState(false)
+  const [promptLibraryOpen, setPromptLibraryOpen] = useState(false)
+  const [promptTemplates, setPromptTemplates] = useState<PromptTemplate[]>([])
+  const [promptSearch, setPromptSearch] = useState('')
+  const [promptLoading, setPromptLoading] = useState(false)
+  const [savePromptOpen, setSavePromptOpen] = useState(false)
+  const [promptName, setPromptName] = useState('')
+  const promptSearchRef = useRef<HTMLInputElement>(null)
   /* ---- 全局状态 ---- */
   const { addPendingTask, currentTaskId, setCurrentTask, getCurrentTask, retryTask } =
     useTaskStore()
-  const { loadEnabledModels, modelList, showFeatureHint, setShowFeatureHint } = useModelStore()
+  const { loadEnabledModels, modelList } = useModelStore()
 
   /* ---- 表单 ---- */
   const form = useForm<NoteFormValues>({
@@ -156,6 +163,14 @@ const NoteForm = () => {
   })
   const currentTask = getCurrentTask()
 
+  const filteredPromptTemplates = useMemo(() => {
+    const query = promptSearch.trim().toLocaleLowerCase()
+    if (!query) return promptTemplates
+    return promptTemplates.filter(template =>
+      `${template.name}\n${template.content}`.toLocaleLowerCase().includes(query),
+    )
+  }, [promptSearch, promptTemplates])
+
   /* ---- 派生状态（只 watch 一次，提高性能） ---- */
   const platform = useWatch({ control: form.control, name: 'platform' }) as string
   const videoUnderstandingEnabled = useWatch({ control: form.control, name: 'video_understanding' })
@@ -170,6 +185,17 @@ const NoteForm = () => {
 
     return
   }, [])
+  useEffect(() => {
+    if (!promptLibraryOpen) return
+    setPromptSearch('')
+    setPromptLoading(true)
+    void getPrompts()
+      .then(setPromptTemplates)
+      .catch(() => toast.error('提示词库加载失败'))
+      .finally(() => setPromptLoading(false))
+    const timer = window.setTimeout(() => promptSearchRef.current?.focus(), 0)
+    return () => window.clearTimeout(timer)
+  }, [promptLibraryOpen])
   useEffect(() => {
     let cancelled = false
     getStorageConfig()
@@ -251,11 +277,19 @@ const NoteForm = () => {
     try {
       const data = await generateNote(payload)
       addPendingTask(data.task_id, values.platform, payload)
-    } catch (e: any) {
+    } catch (e: unknown) {
       // 就绪门禁：本地转写模型还没下载好。后端返回 reason='transcriber_model_not_ready'，
       // 引导用户去「设置 → 音频转写配置」下载，而不是留一个静默失败的任务。
-      if (e?.data?.reason === 'transcriber_model_not_ready') {
-        const downloading = e?.data?.downloading
+      const errorData =
+        e &&
+        typeof e === 'object' &&
+        'data' in e &&
+        typeof e.data === 'object' &&
+        e.data !== null
+          ? (e.data as { reason?: string; downloading?: boolean })
+          : undefined
+      if (errorData?.reason === 'transcriber_model_not_ready') {
+        const downloading = errorData.downloading
         toast.error(
           downloading
             ? '转写模型正在下载中，请稍候再提交'
@@ -317,7 +351,7 @@ const NoteForm = () => {
             <FormField
               control={form.control}
               name="platform"
-              render={({ field }) => (
+              render={() => (
                 <FormItem>
                   <Select
                     disabled={!!editing}
@@ -493,7 +527,7 @@ const NoteForm = () => {
             <FormField
               control={form.control}
               name="video_understanding"
-              render={({ field }) => (
+              render={() => (
                 <FormItem>
                   <div className="flex items-center gap-2">
                     <FormLabel>启用</FormLabel>
@@ -611,7 +645,170 @@ const NoteForm = () => {
             name="extras"
             render={({ field }) => (
               <FormItem>
-                <SectionHeader title="备注" tip="可在 Prompt 结尾附加自定义说明" />
+                <div className="my-3 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <h2 className="block">备注</h2>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="hover:text-primary h-4 w-4 cursor-pointer text-neutral-400" />
+                        </TooltipTrigger>
+                        <TooltipContent className="text-xs">可在 Prompt 结尾附加自定义说明</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <Button
+                      type="button"
+                      variant={promptLibraryOpen ? 'secondary' : 'outline'}
+                      size="sm"
+                      onClick={() => setPromptLibraryOpen(open => !open)}
+                    >
+                      <Search className="h-4 w-4" />
+                      提示词库
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={savePromptOpen ? 'secondary' : 'outline'}
+                      size="sm"
+                      onClick={() => setSavePromptOpen(open => !open)}
+                    >
+                      存为模板
+                    </Button>
+                  </div>
+                </div>
+
+                {promptLibraryOpen && (
+                  <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <Search className="text-muted-foreground absolute top-2.5 left-2 h-4 w-4" />
+                        <Input
+                          ref={promptSearchRef}
+                          value={promptSearch}
+                          onChange={event => setPromptSearch(event.target.value)}
+                          placeholder="搜索模板名称或内容…"
+                          className="pl-8"
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        aria-label="关闭提示词库"
+                        onClick={() => setPromptLibraryOpen(false)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div className="text-muted-foreground mt-2 text-xs">
+                      {filteredPromptTemplates.length} / {promptTemplates.length} 匹配
+                    </div>
+                    <ScrollArea className="mt-2 h-56 rounded border bg-white">
+                      <div className="p-1">
+                        {promptLoading ? (
+                          <div className="p-3 text-sm text-muted-foreground">加载中…</div>
+                        ) : filteredPromptTemplates.length === 0 ? (
+                          <div className="p-3 text-sm text-muted-foreground">
+                            {promptTemplates.length === 0 ? '提示词库还是空的' : '没有匹配的模板'}
+                          </div>
+                        ) : (
+                          filteredPromptTemplates.map(template => (
+                            <div
+                              key={template.name}
+                              className="group flex items-center gap-2 rounded px-2 py-2 hover:bg-slate-50"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate text-sm font-medium">{template.name}</div>
+                                <div className="text-muted-foreground truncate text-xs">
+                                  {template.content.replace(/\s+/g, ' ').trim() || '（空内容）'}
+                                </div>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  field.onChange(template.content)
+                                  setPromptLibraryOpen(false)
+                                  toast.success(`已载入「${template.name}」`)
+                                }}
+                              >
+                                载入
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                aria-label={`删除模板 ${template.name}`}
+                                className="text-destructive opacity-0 group-hover:opacity-100"
+                                onClick={() => {
+                                  if (!window.confirm(`确定删除模板「${template.name}」吗？`)) return
+                                  void deletePrompt(template.name)
+                                    .then(() => {
+                                      setPromptTemplates(items =>
+                                        items.filter(item => item.name !== template.name),
+                                      )
+                                      toast.success('模板已删除')
+                                    })
+                                    .catch(() => toast.error('模板删除失败'))
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </ScrollArea>
+                  </div>
+                )}
+
+                {savePromptOpen && (
+                  <div className="mb-3 flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                    <Input
+                      value={promptName}
+                      onChange={event => setPromptName(event.target.value)}
+                      placeholder="模板名称"
+                      className="flex-1"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => {
+                        const name = promptName.trim()
+                        if (!name) {
+                          toast.error('请输入模板名称')
+                          return
+                        }
+                        void savePrompt({ name, content: field.value || '' })
+                          .then(saved => {
+                            setPromptTemplates(items => [
+                              saved,
+                              ...items.filter(item => item.name !== saved.name),
+                            ])
+                            setPromptName('')
+                            setSavePromptOpen(false)
+                            toast.success('模板已保存')
+                          })
+                          .catch(() => toast.error('模板保存失败'))
+                      }}
+                    >
+                      保存
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setPromptName('')
+                        setSavePromptOpen(false)
+                      }}
+                    >
+                      取消
+                    </Button>
+                  </div>
+                )}
                 <Textarea placeholder="笔记需要罗列出 xxx 关键点…" {...field} />
                 <FormMessage />
               </FormItem>
