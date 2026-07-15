@@ -2,6 +2,12 @@
 
 更新时间：2026-07-15
 
+## T5 发版证据
+
+- `master` 已从最新 `origin/master`（`2cd0356`，包含 2.5.1）快进后，以 merge commit `ec6755fdb4762f91f23df8fd3383cff1f32bc1e4`（`chore(release): v2.5.2-ex`）合并 `feat/2.5.2`，并已推送到 fork `origin/master`。
+- annotated tag `v2.5.2-ex` 已推送到 origin，指向上述 release merge commit。
+- 发版 Docker CI [29386182139](https://github.com/olalo233/BiliNote/actions/runs/29386182139) 全绿：release tag 校验、Docker 构建、smoke、verified image push 和 usage instructions 均通过。日志内容检查：`Default image size: 1099834285 bytes`、`faster-whisper`/`ctranslate2`/`av` 均为 `Package(s) not found`、第二次构建 `Second build cached operation lines: 12`；推送标签 `ghcr.io/olalo233/bilinote:2.5.2-ex` 与 `ghcr.io/olalo233/bilinote:latest` 同 digest `sha256:0faa918943b894d6ce9d2e446016abcaccb6726cb2a7ff9fe6d117afb26c0eec`。
+
 ## 需要 CI/NAS 才能完成的验收
 
 - Fork CI run [29382737030](https://github.com/olalo233/BiliNote/actions/runs/29382737030) 在真正进入 smoke 前失败：`docker/build-push-action@v6` 拒绝不支持的 `progress` input，原 BtbN 归档 URL 返回 HTTP 404。已改为可访问的固定 FFmpeg 7.1.5 归档并显式校验 SHA256，同时用 `BUILDKIT_PROGRESS=plain` 保留可审计构建日志；需重新跑 CI 才能取得最终硬指标。
