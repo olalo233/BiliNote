@@ -272,13 +272,13 @@ jobs:
           cached_step_ids = {
               match.group(1)
               for line in lines
-              if (match := re.match(r"^(#\\d+)", line)) and "CACHED" in line
+              if (match := re.match(r"^(#\d+)", line)) and "CACHED" in line
           }
           for marker in markers:
               matching_ids = {
                   match.group(1)
                   for line in lines
-                  if marker in line and (match := re.match(r"^(#\\d+)", line))
+                  if marker in line and (match := re.match(r"^(#\d+)", line))
               }
               if not matching_ids & cached_step_ids:
                   raise SystemExit(f"cache assertion failed for: {marker}")
