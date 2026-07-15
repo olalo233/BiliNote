@@ -12,12 +12,19 @@
 - NAS `nas_z423` 已补做真实内容检查：隔离容器用 `yt-dlp` 下载公开视频 `https://www.bilibili.com/video/BV1VR4y1p7zq/` 的真实音频并转 WAV；仓库 `generate_screenshot()` 对真实视频流生成 JPEG，输出 `SCREENSHOT_BYTES=16661`、JPEG magic `ffd8ffe000104a464946`。
 - NAS 临时卷已验证本地 Whisper 懒加载的关键链路：首次 `ensure_local_whisper()` 日志显示固定三包安装到 `/app/backend/data/runtime-deps/py311`；同卷新容器再次启动只输出 `local_whisper_runtime_ready`，未重复安装；使用官方 `faster-whisper-tiny` 模型对该真实 B 站音频转写，输出 `TRANSCRIBE_LANGUAGE=zh`、`TRANSCRIPT_CHARS=1278`，抽查文本为可读中文（有正常模型误识别，不是对象 repr/空文本）。用户已明确几乎不使用本地 Whisper，本批次不再继续该方向探索。
 - NAS 的 Hugging Face Hub 自动 HEAD/重定向探测在 `hf-mirror.com` 上失败；为完成一次真实转写，模型文件通过该镜像可用的 `resolve` GET 接口放入临时卷后加载。该网络兼容性事实保留，不把它包装成默认自动下载已验证。
+- Fork CI run [29385226801](https://github.com/olalo233/BiliNote/actions/runs/29385226801) 已针对提交 `a13a887` 全绿：Docker 构建、镜像 smoke、验证标签推送和 usage instructions 均通过，耗时 3m6s；仅保留 Node 24 强制兼容提示以及 CI runner 无法访问 Bilibili/YouTube 的既有 warning。NAS 拉取该 run 推送的 `latest` 镜像成功，digest 为 `sha256:fc7b98de8c4e4ba324427625f67da20599e00f742e248f9478284dd09c216acd`。
+- 新镜像在 NAS 隔离容器 `bilinote-252-app-e2e` 上启动成功。该镜像首次深链打开真实 task `32a0a7c5-9771-41b9-90e8-b818a50fdd59` 时曾暴露前端 `ReferenceError: field is not defined`；根因是 `NoteForm` 的平台 `FormField` 回调没有解构 `field`，已由 `a13a887` 修复。修复镜像浏览器实测渲染真实 Markdown（标题“高并发热点账户性能攻坚”）、页面 URL 保持 `/note/<task_id>`，无运行时 error。
 - T5 的镜像 push、分支合并、tag 与发版 CI 尚未执行；此前 HTTPS push 曾因 OAuth App 缺少 `workflow` scope 被拒，现已改用已恢复的 SSH 链路完成分支推送。
+
+## 已完成真实内容验收
+
+- T4 深链在更新后的 CI 镜像上用独立浏览器 tab 实测：新镜像从后端水化真实 task，DOM 含完整标题、目录和正文；地址栏为 `http://127.0.0.1:18081/note/32a0a7c5-9771-41b9-90e8-b818a50fdd59`，工具栏含“复制笔记链接”，点击后无 console error。刷新后仍能加载。不存在的 id 显示“笔记不存在或已删除”和“回到首页”，不白屏；仅有既有 Dialog `aria-describedby` warning 和预期的 not-found warning。
+- T3 在 NAS 隔离配置副本中创建未引用源 `T3-delete-unreferenced-20260715`，通过真实前端删除按钮完成确认、toast“已删除”、列表移除，刷新后源仍不存在。对真实绑定的 `minio-img-ssl` 发起删除，得到 `HTTP_STATUS=400`、`source minio-img-ssl 正被功能引用: image_bed`，配置再次读取确认源仍存在。
 
 ## 当前环境无法产生真实内容的验收
 
-- T4 的“新浏览器/无本地 store 加载真实笔记”和 Obsidian Clipper 属性截图仍未完成：NAS 现有旧部署确有真实成功笔记产物（例如 task `32a0a7c5-9771-41b9-90e8-b818a50fdd59`，状态 `SUCCESS`、Markdown 3479 字符），但本批次新镜像的深链水化与 Clipper 属性尚未完成实测；不会把旧部署产物冒充新镜像证据。
-- T3 浏览器验收已确认删除按钮和引用保护 API；带确认框的无引用源 UI 删除动作未在浏览器中点击，避免未经用户确认删除本地配置。后端测试和真实 API 引用保护请求已覆盖核心行为。
+- T2 已验证提示词库真实保存/读取：模板 `T2-真实提示词验收-20260715` 的内容和唯一标记 `PROMPT_LIBRARY_PROOF_20260715` 经 POST/GET 内容检查一致。但“加载模板后调用真实模型生成并在产物中看到唯一标记”尚未完成：用户指定的公开视频 `BV1VR4y1p7zq` 通过 `yt-dlp` 返回 `There are no subtitles for the requested languages`；复用 NAS 缓存字幕向外部模型发送的尝试被数据外传保护拦截，未发送任何字幕，不能用占位内容冒充通过。NAS 没有本地 Ollama 服务可替代。
+- T4 Web Clipper 的 Obsidian 属性截图仍未完成：当前环境没有可用的 Obsidian 实例/连接器；仓库 T4 文档中的最终模板 JSON 已存在，但未声称完成该截图验收。
 
 ## 既有 lint 债务
 
