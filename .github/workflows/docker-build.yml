@@ -68,6 +68,8 @@ jobs:
 
       - name: Build Docker Image (load only, no push)
         uses: docker/build-push-action@v6
+        env:
+          BUILDKIT_PROGRESS: plain
         with:
           context: .
           file: Dockerfile.complete
@@ -79,7 +81,6 @@ jobs:
             VITE_APP_VERSION=${{ steps.app-version.outputs.version }}
           cache-from: type=registry,ref=ghcr.io/olalo233/bilinote:buildcache
           cache-to: type=registry,ref=ghcr.io/olalo233/bilinote:buildcache,mode=max
-          progress: plain
           platforms: linux/amd64
 
       - name: Run image smoke tests
@@ -134,8 +135,8 @@ jobs:
           test "$IMAGE_SIZE" -lt 1200000000
           docker history --no-trunc "$IMAGE_REF" | tee "$DIAG_DIR/docker-history.txt"
 
-          docker exec "$CONTAINER" ffmpeg -version | grep -F 'ffmpeg version n7.0.2'
-          docker exec "$CONTAINER" ffprobe -version | grep -F 'ffprobe version n7.0.2'
+          docker exec "$CONTAINER" ffmpeg -version | grep -F 'ffmpeg version n7.1.5'
+          docker exec "$CONTAINER" ffprobe -version | grep -F 'ffprobe version n7.1.5'
           for optional_package in faster-whisper ctranslate2 av; do
             if docker exec "$CONTAINER" python -m pip show "$optional_package"; then
               echo "::error title=Unexpected bundled whisper dependency::$optional_package is present in the default image."

@@ -7,12 +7,13 @@ ARG BASE_REGISTRY=docker.io
 FROM ${BASE_REGISTRY}/denoland/deno:bin AS deno-bin
 
 # FFmpeg is built separately so apt does not pull the distro codec dependency
-# graph into the final image.  This is the pinned BtbN 7.0.2 linux64 GPL
+# graph into the final image.  This is the pinned BtbN 7.1.5 linux64 GPL
 # variant; BtbN documents `gpl` as static and `gpl-shared` as the shared build.
 FROM ${BASE_REGISTRY}/debian:bookworm-slim AS ffmpeg-static
 
-ARG FFMPEG_ARCHIVE=ffmpeg-n7.0.2-17-gf705bc5b73-linux64-gpl-7.0.tar.xz
-ARG FFMPEG_BASE_URL=https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2024-09-13-12-57
+ARG FFMPEG_ARCHIVE=ffmpeg-n7.1.5-2-g998de74adf-linux64-gpl-7.1.tar.xz
+ARG FFMPEG_SHA256=7383b376bce89252b00b1196e1d384cbd62c5597e7d42bb6de9a42adcd4fd55b
+ARG FFMPEG_BASE_URL=https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-14-13-19
 
 RUN set -eux; \
     apt-get update; \
@@ -20,13 +21,11 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*; \
     mkdir -p /tmp/ffmpeg /opt/ffmpeg; \
     curl -fsSL "${FFMPEG_BASE_URL}/${FFMPEG_ARCHIVE}" -o "/tmp/ffmpeg/${FFMPEG_ARCHIVE}"; \
-    curl -fsSL "${FFMPEG_BASE_URL}/checksums.sha256" -o /tmp/ffmpeg/checksums.sha256; \
-    grep -E "[ *]${FFMPEG_ARCHIVE}$" /tmp/ffmpeg/checksums.sha256 > /tmp/ffmpeg/selected.sha256; \
-    (cd /tmp/ffmpeg && sha256sum -c selected.sha256); \
+    printf '%s  %s\n' "${FFMPEG_SHA256}" "/tmp/ffmpeg/${FFMPEG_ARCHIVE}" | sha256sum -c -; \
     tar -xJf "/tmp/ffmpeg/${FFMPEG_ARCHIVE}" --strip-components=1 -C /opt/ffmpeg; \
     test -x /opt/ffmpeg/bin/ffmpeg; \
     test -x /opt/ffmpeg/bin/ffprobe; \
-    /opt/ffmpeg/bin/ffmpeg -version | grep -F 'ffmpeg version n7.0.2'; \
+    /opt/ffmpeg/bin/ffmpeg -version | grep -F 'ffmpeg version n7.1.5'; \
     rm -rf /tmp/ffmpeg
 
 # === 阶段1：构建 Backend ===
