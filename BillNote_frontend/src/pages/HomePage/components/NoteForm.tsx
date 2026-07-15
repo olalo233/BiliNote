@@ -353,7 +353,7 @@ const NoteForm = () => {
             <FormField
               control={form.control}
               name="platform"
-              render={() => (
+              render={({ field }) => (
                 <FormItem>
                   <Select
                     disabled={!!editing}
