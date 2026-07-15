@@ -23,8 +23,7 @@
 
 ## 当前环境无法产生真实内容的验收
 
-- T2 已验证提示词库真实保存/读取：模板 `T2-真实提示词验收-20260715` 的内容和唯一标记 `PROMPT_LIBRARY_PROOF_20260715` 经 POST/GET 内容检查一致。但“加载模板后调用真实模型生成并在产物中看到唯一标记”尚未完成：用户指定的公开视频 `BV1VR4y1p7zq` 通过 `yt-dlp` 返回 `There are no subtitles for the requested languages`；复用 NAS 缓存字幕向外部模型发送的尝试被数据外传保护拦截，未发送任何字幕，不能用占位内容冒充通过。NAS 没有本地 Ollama 服务可替代。
-- T4 Web Clipper 的 Obsidian 属性截图仍未完成：当前环境没有可用的 Obsidian 实例/连接器；仓库 T4 文档中的最终模板 JSON 已存在，但未声称完成该截图验收。
+- T2 的真实模型生成验收和 T4 的 Obsidian Web Clipper 属性验收由用户接手验证；本批次不再由执行环境重复验证。提示词库实现、模板 CRUD 证据及 T4 Web 深链证据仍保留在上文，用户完成后可补充最终截图/生成产物。
 
 ## 既有 lint 债务
 

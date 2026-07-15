@@ -2,6 +2,19 @@
 
 本项目所有重要变更记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [2.5.2-ex] - 2026-07-15
+
+### Changed
+
+- Docker 默认镜像瘦身至小于 1.2GB：移除默认镜像中的 `hf-xet`、静态 FFmpeg 依赖层和本地 Whisper 运行依赖，并确定依赖层缓存边界。
+- 本地 Whisper 改为按需安装到持久化 `data` 卷；默认镜像不再包含 `faster-whisper`、`ctranslate2` 和 `av`。
+
+### Added
+
+- 提示词库：备注模板支持搜索、载入、保存和删除。
+- 笔记深链 `/note/:taskId` 与复制笔记链接按钮，支持后端水化和刷新访问。
+- 存储设置中的供应商删除按钮，并保留被功能引用时的后端保护提示。
+
 ## [2.5.1-ex.2] - 2026-07-14
 
 ### Changed
