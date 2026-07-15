@@ -88,8 +88,11 @@ jobs:
         run: |
           set -euxo pipefail
           trap 'status=$?; echo "::error title=Smoke command failed::${BASH_COMMAND} (line ${LINENO})"; exit "$status"' ERR
-          VERSION="${GITHUB_REF_NAME#v}"
-          VERSION="${VERSION:-latest}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="latest"
+          fi
           IMAGE="${REGISTRY}/${GITHUB_REPOSITORY,,}"
           IMAGE_REF="$IMAGE:$VERSION"
           CONTAINER="bilinote-smoke"
