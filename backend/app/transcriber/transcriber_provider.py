@@ -3,12 +3,19 @@ import platform
 from enum import Enum
 
 from app.transcriber.groq import GroqTranscriber
-from app.transcriber.whisper import WhisperTranscriber
 from app.transcriber.bcut import BcutTranscriber
 from app.transcriber.kuaishou import KuaishouTranscriber
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+try:
+    from app.transcriber.whisper import WhisperTranscriber
+except ImportError as exc:
+    # The module itself is intentionally light, but keep this factory safe if
+    # a platform-specific optional import ever leaks into it.
+    WhisperTranscriber = None
+    logger.warning("本地 Whisper 工厂不可用: %s", exc)
 
 class TranscriberType(str, Enum):
     FAST_WHISPER = "fast-whisper"
@@ -55,6 +62,8 @@ def get_groq_transcriber():
     return _init_transcriber(TranscriberType.GROQ, GroqTranscriber)
 
 def get_whisper_transcriber(model_size="base", device="cuda"):
+    if WhisperTranscriber is None:
+        raise RuntimeError("本地 Whisper 工厂不可用，请切换到在线转写引擎")
     return _init_transcriber(TranscriberType.FAST_WHISPER, WhisperTranscriber, model_size=model_size, device=device)
 
 def get_bcut_transcriber():

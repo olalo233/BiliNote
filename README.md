@@ -207,6 +207,8 @@ docker run -d -p 80:80 \
 
 上面四个卷分别持久化：`data`（SQLite 数据库 + 生成的笔记）、`config`（LLM 供应商配置 / Cookie / 转写设置）、`static`（笔记引用的视频截图）、`models`（Whisper 模型缓存，可选，避免每次重新下载）。这样 `docker pull` 升级新镜像、删旧容器重建后，配置和历史都不会丢。
 
+> 本地 Whisper 为按需依赖：首次在设置中选择本地 Whisper 时，容器会联网安装 `faster-whisper`、`ctranslate2` 和 `av` 到 `data` 卷中的运行时依赖目录；默认镜像不包含这些包。首次使用需要容器能够访问 Python 包源，后续重建容器会复用该卷。
+
 #### 对象存储配置（可选）
 
 图床和资产归档默认关闭，不配置时保持原有本地存储行为。使用 Docker 时，把下面内容保存到持久化的 `config` 卷中的 `storage.json`（宿主机源码部署对应 `backend/config/storage.json`；容器内路径为 `/app/backend/config/storage.json`）。示例使用本项目测试实例的 endpoint 和桶名，凭据必须替换为你自己的值，不能把真实 secret 提交到仓库：
@@ -427,6 +429,8 @@ docker run -d -p 80:80 \
 ```
 
 上面四个卷分别持久化：`data`（SQLite 数据库 + 生成的笔记）、`config`（LLM 供应商配置 / Cookie / 转写设置）、`static`（笔记引用的视频截图）、`models`（Whisper 模型缓存，可选，避免每次重新下载）。这样 `docker pull` 升级新镜像、删旧容器重建后，配置和历史都不会丢。
+
+> 本地 Whisper 为按需依赖：首次在设置中选择本地 Whisper 时，容器会联网安装 `faster-whisper`、`ctranslate2` 和 `av` 到 `data` 卷中的运行时依赖目录；默认镜像不包含这些包。首次使用需要容器能够访问 Python 包源，后续重建容器会复用该卷。
 
 > ⚠️ **不要**用 `-v 卷名:/app/backend` 挂整个后端目录——命名卷会用首次启动时的镜像内容固化，之后 `docker pull` 升级也会被旧代码盖住，导致「升级不生效」。只挂上面这些数据子目录即可。
 

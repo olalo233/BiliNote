@@ -68,6 +68,8 @@ jobs:
 
       - name: Build Docker Image (load only, no push)
         uses: docker/build-push-action@v6
+        env:
+          BUILDKIT_PROGRESS: plain
         with:
           context: .
           file: Dockerfile.complete
@@ -77,8 +79,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             VITE_APP_VERSION=${{ steps.app-version.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=registry,ref=ghcr.io/olalo233/bilinote:buildcache
+          cache-to: type=registry,ref=ghcr.io/olalo233/bilinote:buildcache,mode=max
           platforms: linux/amd64
 
       - name: Run image smoke tests
@@ -86,7 +88,11 @@ jobs:
         run: |
           set -euxo pipefail
           trap 'status=$?; echo "::error title=Smoke command failed::${BASH_COMMAND} (line ${LINENO})"; exit "$status"' ERR
-          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="latest"
+          fi
           IMAGE="${REGISTRY}/${GITHUB_REPOSITORY,,}"
           IMAGE_REF="$IMAGE:$VERSION"
           CONTAINER="bilinote-smoke"
@@ -106,6 +112,9 @@ jobs:
             {
               echo "### Docker smoke diagnostics"
               echo "Image: $IMAGE_REF"
+              echo "Image size: $(docker image inspect -f '{{.Size}}' "$IMAGE_REF" 2>/dev/null || true) bytes"
+              echo '--- docker history ---'
+              docker history --no-trunc "$IMAGE_REF" 2>/dev/null || true
               for f in default-container auto-update-container default-backend auto-update-backend; do
                 echo "--- $f.log ---"
                 sed -n '1,240p' "$DIAG_DIR/$f.log" 2>/dev/null || true
@@ -123,6 +132,20 @@ jobs:
           trap on_exit EXIT
 
           docker run -d --name "$CONTAINER" --platform linux/amd64 -p 18080:80 "$IMAGE_REF"
+
+          IMAGE_SIZE="$(docker image inspect -f '{{.Size}}' "$IMAGE_REF")"
+          echo "Default image size: ${IMAGE_SIZE} bytes"
+          test "$IMAGE_SIZE" -lt 1200000000
+          docker history --no-trunc "$IMAGE_REF" | tee "$DIAG_DIR/docker-history.txt"
+
+          docker exec "$CONTAINER" ffmpeg -version | grep -F 'ffmpeg version n7.1.5'
+          docker exec "$CONTAINER" ffprobe -version | grep -F 'ffprobe version n7.1.5'
+          for optional_package in faster-whisper ctranslate2 av; do
+            if docker exec "$CONTAINER" python -m pip show "$optional_package"; then
+              echo "::error title=Unexpected bundled whisper dependency::$optional_package is present in the default image."
+              exit 1
+            fi
+          done
 
           for attempt in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:18080/api/sys_health >/tmp/sys-health.json; then
@@ -213,6 +236,54 @@ jobs:
             echo '::error title=Auto-update switch inert::YTDLP_AUTO_UPDATE=1 did not trigger a pip run (check supervisord command expansion).'
             exit 1
           fi
+
+          # Rebuild with one backend-only source-line change.  The plain BuildKit
+          # log is the auditable cache evidence: stable dependency/FFmpeg/Deno
+          # operations must remain CACHED while the final backend COPY changes.
+          CACHE_PROBE_ORIGINAL="$RUNNER_TEMP/bilinote-main.py"
+          cp "$GITHUB_WORKSPACE/backend/main.py" "$CACHE_PROBE_ORIGINAL"
+          sed -i 's/^logger = get_logger(__name__)/logger = get_logger(__name__)  # cache probe/' "$GITHUB_WORKSPACE/backend/main.py"
+          grep -Fq '# cache probe' "$GITHUB_WORKSPACE/backend/main.py"
+          docker buildx build \
+            --file "$GITHUB_WORKSPACE/Dockerfile.complete" \
+            --platform linux/amd64 \
+            --tag "$IMAGE:cache-probe" \
+            --load \
+            --cache-from type=registry,ref=ghcr.io/olalo233/bilinote:buildcache \
+            --progress=plain \
+            "$GITHUB_WORKSPACE" 2>&1 | tee "$RUNNER_TEMP/docker-cache-second.log"
+          mv "$CACHE_PROBE_ORIGINAL" "$GITHUB_WORKSPACE/backend/main.py"
+          CACHED_LINES="$(grep -c '^#[0-9].*CACHED' "$RUNNER_TEMP/docker-cache-second.log" || true)"
+          echo "Second build cached operation lines: $CACHED_LINES"
+          test "$CACHED_LINES" -ge 5
+          python - "$RUNNER_TEMP/docker-cache-second.log" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          lines = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").splitlines()
+          markers = (
+              "COPY ./backend/requirements.txt",
+              "pip install --no-cache-dir --no-compile",
+              "[ffmpeg-static 2/2] RUN",
+              "COPY --from=deno-bin /deno",
+              "COPY --from=backend-builder /usr/local/lib/python3.11/site-packages",
+          )
+          cached_step_ids = {
+              match.group(1)
+              for line in lines
+              if (match := re.match(r"^(#\d+)", line)) and "CACHED" in line
+          }
+          for marker in markers:
+              matching_ids = {
+                  match.group(1)
+                  for line in lines
+                  if marker in line and (match := re.match(r"^(#\d+)", line))
+              }
+              if not matching_ids & cached_step_ids:
+                  raise SystemExit(f"cache assertion failed for: {marker}")
+              print(f"cached: {marker}")
+          PY
 
           if timeout 45s docker exec "$CONTAINER" python -m yt_dlp -F 'https://www.youtube.com/watch?v=YM0_8mOaKic' > /tmp/youtube-formats.txt 2>&1; then
             if grep -Eiq 'm4a|webm|audio' /tmp/youtube-formats.txt; then

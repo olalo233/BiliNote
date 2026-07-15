@@ -67,10 +67,21 @@ export interface Task {
   }
 }
 
+export interface HydrateTaskPayload {
+  status: TaskStatus
+  message?: string
+  result?: {
+    markdown?: string | Markdown[]
+    transcript?: Partial<Transcript>
+    audio_meta?: Partial<AudioMeta>
+  }
+}
+
 interface TaskStore {
   tasks: Task[]
   currentTaskId: string | null
   addPendingTask: (taskId: string, platform: string) => void
+  hydrateTask: (taskId: string, payload: HydrateTaskPayload) => void
   updateTaskContent: (id: string, data: Partial<Omit<Task, 'id' | 'createdAt'>>) => void
   removeTask: (id: string) => void
   clearTasks: () => void
@@ -116,6 +127,56 @@ export const useTaskStore = create<TaskStore>()(
           ],
           currentTaskId: taskId, // 默认设置为当前任务
         })),
+
+      hydrateTask: (taskId, payload) =>
+        set(state => {
+          const existing = state.tasks.find(task => task.id === taskId)
+          const result = payload.result || {}
+          const emptyTranscript: Transcript = {
+            full_text: '',
+            language: '',
+            raw: null,
+            segments: [],
+          }
+          const emptyAudioMeta: AudioMeta = {
+            cover_url: '',
+            duration: 0,
+            file_path: '',
+            platform: existing?.formData.platform || '',
+            raw_info: null,
+            title: '',
+            video_id: '',
+          }
+          const hydrated: Task = {
+            id: taskId,
+            markdown: result.markdown ?? existing?.markdown ?? '',
+            transcript: { ...emptyTranscript, ...result.transcript },
+            status: payload.status,
+            error: payload.status === 'FAILED' ? payload.message : existing?.error,
+            audioMeta: { ...emptyAudioMeta, ...result.audio_meta },
+            createdAt: existing?.createdAt || new Date().toISOString(),
+            formData: existing?.formData || {
+              video_url: '',
+              link: false,
+              screenshot: false,
+              platform: '',
+              quality: 'medium',
+              model_name: '',
+              provider_id: '',
+            },
+          }
+
+          return {
+            tasks: existing
+              ? state.tasks.map(task =>
+                  task.id === taskId
+                    ? { ...hydrated, formData: task.formData, createdAt: task.createdAt }
+                    : task,
+                )
+              : [hydrated, ...state.tasks],
+            currentTaskId: taskId,
+          }
+        }),
 
       updateTaskContent: (id, data) =>
           set(state => ({

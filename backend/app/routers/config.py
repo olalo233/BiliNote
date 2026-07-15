@@ -11,6 +11,7 @@ from app.utils.path_helper import get_model_dir
 
 from app.services.cookie_manager import CookieConfigManager
 from app.services.transcriber_config_manager import TranscriberConfigManager
+from app.services.prompt_library_manager import PromptLibraryManager
 from app.transcriber import model_download_state as dl_state
 from ffmpeg_helper import ensure_ffmpeg_or_raise
 
@@ -19,11 +20,38 @@ logger = get_logger(__name__)
 router = APIRouter()
 cookie_manager = CookieConfigManager()
 transcriber_config_manager = TranscriberConfigManager()
+prompt_library_manager = PromptLibraryManager()
 
 
 class CookieUpdateRequest(BaseModel):
     platform: str
     cookie: str
+
+
+class PromptRequest(BaseModel):
+    name: str
+    content: str = ""
+
+
+@router.get("/prompts")
+def list_prompts():
+    return R.success(data=prompt_library_manager.list())
+
+
+@router.post("/prompts")
+def save_prompt(data: PromptRequest):
+    try:
+        prompt = prompt_library_manager.upsert(data.name, data.content)
+    except ValueError as exc:
+        return R.error(msg=str(exc), code=400)
+    return R.success(data=prompt, msg="提示词模板已保存")
+
+
+@router.delete("/prompts/{name}")
+def delete_prompt(name: str):
+    if not prompt_library_manager.delete(name):
+        return R.error(msg="提示词模板不存在", code=404)
+    return R.success(msg="提示词模板已删除")
 
 
 @router.get("/get_downloader_cookie/{platform}")
@@ -69,6 +97,7 @@ WHISPER_MODEL_SIZES = ["tiny", "base", "small", "medium", "large-v3", "large-v3-
 def get_transcriber_config():
     from app.transcriber.transcriber_provider import MLX_WHISPER_AVAILABLE
     from app.transcriber.whisper_models import get_registry, BUILTIN_WHISPER_MODELS
+    from app.services.optional_deps import is_local_whisper_installed
 
     registry = get_registry()
     config = transcriber_config_manager.get_config()
@@ -80,6 +109,7 @@ def get_transcriber_config():
         "whisper_builtin_models": BUILTIN_WHISPER_MODELS,
         "whisper_custom_models": registry.get_custom_models(),
         "mlx_whisper_available": MLX_WHISPER_AVAILABLE,
+        "local_whisper_installed": is_local_whisper_installed(),
     })
 
 
@@ -389,6 +419,8 @@ async def sys_health():
         if ttype == "fast-whisper":
             whisper_info["downloaded"] = _check_whisper_model_exists(size, "whisper")
             whisper_info["checked"] = True
+            from app.services.optional_deps import is_local_whisper_installed
+            whisper_info["local_whisper_installed"] = is_local_whisper_installed()
         elif ttype == "mlx-whisper":
             whisper_info["downloaded"] = _check_mlx_whisper_model_exists(size)
             whisper_info["checked"] = True

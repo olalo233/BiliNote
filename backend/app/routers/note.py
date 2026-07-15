@@ -216,6 +216,8 @@ def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
                         "transcriber_type": readiness["transcriber_type"],
                         "model_size": readiness["model_size"],
                         "downloading": readiness["downloading"],
+                        "local_whisper_installed": readiness.get("local_whisper_installed"),
+                        "optional_dependency_status": readiness.get("optional_dependency_status"),
                     },
                 )
 
@@ -307,12 +309,9 @@ def get_task_status(task_id: str):
             "task_id": task_id
         })
 
-    # 什么都没有，默认PENDING
-    return R.success({
-        "status": TaskStatus.PENDING.value,
-        "message": "任务排队中",
-        "task_id": task_id
-    })
+    # 没有任何持久化记录时明确返回 404，让深链可以区分「任务排队中」和
+    # 「笔记不存在或已删除」。正常提交会在返回 task_id 前先写入 PENDING 状态文件。
+    raise HTTPException(status_code=404, detail="笔记不存在或已删除")
 
 
 @router.get("/image_proxy")

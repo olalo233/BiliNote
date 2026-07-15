@@ -61,10 +61,6 @@ export const delete_task = async ({ video_id, platform }) => {
 }
 
 export const get_task_status = async (task_id: string) => {
-  try {
-    return await request.get('/task_status/' + task_id, { suppressToast: true })
-  } catch (e) {
-    console.error('❌ 请求出错', e)
-    throw e // 抛出错误以便调用方处理
-  }
+  // 深链页面把 404 转换成友好空态；不要让预期的「笔记不存在」污染控制台。
+  return await request.get('/task_status/' + task_id, { suppressToast: true })
 }

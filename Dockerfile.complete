@@ -6,32 +6,42 @@ ARG BASE_REGISTRY=docker.io
 # 避免在运行时镜像里通过 curl 执行不受锁定的安装脚本。
 FROM ${BASE_REGISTRY}/denoland/deno:bin AS deno-bin
 
+# FFmpeg is built separately so apt does not pull the distro codec dependency
+# graph into the final image.  This is the pinned BtbN 7.1.5 linux64 GPL
+# variant; BtbN documents `gpl` as static and `gpl-shared` as the shared build.
+FROM ${BASE_REGISTRY}/debian:bookworm-slim AS ffmpeg-static
+
+ARG FFMPEG_ARCHIVE=ffmpeg-n7.1.5-2-g998de74adf-linux64-gpl-7.1.tar.xz
+ARG FFMPEG_SHA256=7383b376bce89252b00b1196e1d384cbd62c5597e7d42bb6de9a42adcd4fd55b
+ARG FFMPEG_BASE_URL=https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-14-13-19
+
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl xz-utils; \
+    rm -rf /var/lib/apt/lists/*; \
+    mkdir -p /tmp/ffmpeg /opt/ffmpeg; \
+    curl -fsSL "${FFMPEG_BASE_URL}/${FFMPEG_ARCHIVE}" -o "/tmp/ffmpeg/${FFMPEG_ARCHIVE}"; \
+    printf '%s  %s\n' "${FFMPEG_SHA256}" "/tmp/ffmpeg/${FFMPEG_ARCHIVE}" | sha256sum -c -; \
+    tar -xJf "/tmp/ffmpeg/${FFMPEG_ARCHIVE}" --strip-components=1 -C /opt/ffmpeg; \
+    test -x /opt/ffmpeg/bin/ffmpeg; \
+    test -x /opt/ffmpeg/bin/ffprobe; \
+    /opt/ffmpeg/bin/ffmpeg -version | grep -F 'ffmpeg version n7.1.5'; \
+    rm -rf /tmp/ffmpeg
+
 # === 阶段1：构建 Backend ===
 FROM ${BASE_REGISTRY}/library/python:3.11-slim AS backend-builder
 
-ARG APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
 ARG PIP_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
 
-RUN set -ex && \
-    rm -f /etc/apt/sources.list && \
-    rm -rf /etc/apt/sources.list.d/* && \
-    echo "deb http://${APT_MIRROR}/debian bookworm main contrib non-free non-free-firmware" > /etc/apt/sources.list && \
-    echo "deb http://${APT_MIRROR}/debian bookworm-updates main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
-    echo "deb http://${APT_MIRROR}/debian-security bookworm-security main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg && \
-    rm -rf /var/lib/apt/lists/*
-
-ENV PATH="/usr/bin:${PATH}"
+ENV PATH="/usr/bin:${PATH}" \
+    PYTHONDONTWRITEBYTECODE=1
 ENV HF_ENDPOINT=https://hf-mirror.com
 
 WORKDIR /tmp/backend
 
 # 先复制 requirements.txt 利用层缓存
 COPY ./backend/requirements.txt /tmp/backend/requirements.txt
-RUN pip install --no-cache-dir -i ${PIP_INDEX} -r requirements.txt
-
-COPY ./backend /tmp/backend
+RUN pip install --no-cache-dir --no-compile -i ${PIP_INDEX} -r requirements.txt
 
 # === 阶段2：构建 Frontend ===
 # Node 18-alpine 跑不动 Tailwind v4 / Vite 6（前者要求 Node 20+，后者推荐 Node 20+），
@@ -68,7 +78,7 @@ FROM ${BASE_REGISTRY}/library/python:3.11-slim
 
 ARG APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
 
-# 安装必要的运行时依赖
+# 只安装进程管理和反向代理；FFmpeg 来自前面的静态构建阶段。
 RUN set -ex && \
     rm -f /etc/apt/sources.list && \
     rm -rf /etc/apt/sources.list.d/* && \
@@ -76,25 +86,27 @@ RUN set -ex && \
     echo "deb http://${APT_MIRROR}/debian bookworm-updates main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
     echo "deb http://${APT_MIRROR}/debian-security bookworm-security main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
     apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg nginx supervisor procps && \
+    apt-get install -y --no-install-recommends nginx supervisor procps && \
     rm -rf /var/lib/apt/lists/*
+
+# 静态 FFmpeg 不依赖 Debian 的 libav* 包，运行时只留下两个可执行文件。
+COPY --from=ffmpeg-static /opt/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg
+COPY --from=ffmpeg-static /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe
 
 # yt-dlp 从 PATH 自动发现 deno。
 COPY --from=deno-bin /deno /usr/local/bin/deno
 
 ENV PATH="/usr/bin:${PATH}"
 ENV HF_ENDPOINT=https://hf-mirror.com
+ENV HF_HUB_DISABLE_XET=1
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
 ENV YTDLP_AUTO_UPDATE=0
 ENV PIP_INDEX_URL=""
 
-# 复制 Python 依赖
+# 稳定依赖层：只由 backend/requirements.txt 变化触发重建。
 COPY --from=backend-builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=backend-builder /usr/local/bin /usr/local/bin
-
-# 复制 backend 代码
-COPY ./backend /app/backend
-WORKDIR /app/backend
 
 # 复制前端静态文件到 nginx
 COPY --from=frontend-builder /tmp/frontend/dist /usr/share/nginx/html
@@ -140,6 +152,10 @@ autorestart=true
 priority=20
 environment=BACKEND_PORT="%(ENV_BACKEND_PORT)s",BACKEND_HOST="%(ENV_BACKEND_HOST)s",TRANSCRIBER_TYPE="%(ENV_TRANSCRIBER_TYPE)s",WHISPER_MODEL_SIZE="%(ENV_WHISPER_MODEL_SIZE)s",FFMPEG_BIN_PATH="%(ENV_FFMPEG_BIN_PATH)s",HF_ENDPOINT="%(ENV_HF_ENDPOINT)s",STATIC="%(ENV_STATIC)s",OUT_DIR="%(ENV_OUT_DIR)s",DATA_DIR="%(ENV_DATA_DIR)s",NOTE_OUTPUT_DIR="%(ENV_NOTE_OUTPUT_DIR)s",DATABASE_URL="%(ENV_DATABASE_URL)s",IMAGE_BASE_URL="%(ENV_IMAGE_BASE_URL)s",ENV="%(ENV_ENV)s",GROQ_TRANSCRIBER_MODEL="%(ENV_GROQ_TRANSCRIBER_MODEL)s",YTDLP_AUTO_UPDATE="%(ENV_YTDLP_AUTO_UPDATE)s",PIP_INDEX_URL="%(ENV_PIP_INDEX_URL)s"
 EOF
+
+# 最易变的层放最后：改后端代码不会重建上面的依赖、FFmpeg、Deno 和前端层。
+COPY ./backend /app/backend
+WORKDIR /app/backend
 
 # nginx/standalone.conf 已直接写好本地 backend(127.0.0.1:8483)与前端静态服务，无需再 sed 改写。
 
