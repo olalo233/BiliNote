@@ -6,6 +6,7 @@
 
 - Fork CI run [29382737030](https://github.com/olalo233/BiliNote/actions/runs/29382737030) 在真正进入 smoke 前失败：`docker/build-push-action@v6` 拒绝不支持的 `progress` input，原 BtbN 归档 URL 返回 HTTP 404。已改为可访问的固定 FFmpeg 7.1.5 归档并显式校验 SHA256，同时用 `BUILDKIT_PROGRESS=plain` 保留可审计构建日志；需重新跑 CI 才能取得最终硬指标。
 - 后续 CI run [29382955194](https://github.com/olalo233/BiliNote/actions/runs/29382955194) 已完成镜像构建，但 smoke 因分支名被误用为 Docker tag（`feat/2.5.2` 含 `/`）在 `docker run` 前失败；已改为分支 smoke 使用 `latest`，tag smoke 才使用去掉 `v` 的 release 版本。
+- CI run [29383251692](https://github.com/olalo233/BiliNote/actions/runs/29383251692) 已证明镜像尺寸为 `1099834273` bytes（低于 1.2GB）、容器启动与基础 smoke 通过，随后因缓存断言把 BuildKit 的“操作行”和下一行的 `#N CACHED` 当成同一行而误报失败；已改为按 BuildKit step ID 配对验证。
 - T1 镜像大小、`docker history`、两次构建缓存命中、默认镜像不含本地 Whisper 依赖及运行时安装转写，未在本机执行。用户已明确本机热点环境禁止拉取/构建大镜像，需由 GitHub Actions 或极空间 NAS 产出真实日志。
 - T5 的镜像 push、分支合并、tag 与发版 CI 尚未执行；当前 HTTPS push 被 GitHub 拒绝：`refusing to allow an OAuth App to create or update workflow .github/workflows/docker-build.yml without workflow scope`。需要刷新 HTTPS 凭据并授予 `workflow` scope 后重试。
 

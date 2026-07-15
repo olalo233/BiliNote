@@ -256,8 +256,34 @@ jobs:
           CACHED_LINES="$(grep -c '^#[0-9].*CACHED' "$RUNNER_TEMP/docker-cache-second.log" || true)"
           echo "Second build cached operation lines: $CACHED_LINES"
           test "$CACHED_LINES" -ge 5
-          grep -E '^#[0-9].*CACHED.*(requirements|pip install|ffmpeg|deno|site-packages)' \
-            "$RUNNER_TEMP/docker-cache-second.log"
+          python - "$RUNNER_TEMP/docker-cache-second.log" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          lines = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").splitlines()
+          markers = (
+              "COPY ./backend/requirements.txt",
+              "pip install --no-cache-dir --no-compile",
+              "[ffmpeg-static 2/2] RUN",
+              "COPY --from=deno-bin /deno",
+              "COPY --from=backend-builder /usr/local/lib/python3.11/site-packages",
+          )
+          cached_step_ids = {
+              match.group(1)
+              for line in lines
+              if (match := re.match(r"^(#\\d+)", line)) and "CACHED" in line
+          }
+          for marker in markers:
+              matching_ids = {
+                  match.group(1)
+                  for line in lines
+                  if marker in line and (match := re.match(r"^(#\\d+)", line))
+              }
+              if not matching_ids & cached_step_ids:
+                  raise SystemExit(f"cache assertion failed for: {marker}")
+              print(f"cached: {marker}")
+          PY
 
           if timeout 45s docker exec "$CONTAINER" python -m yt_dlp -F 'https://www.youtube.com/watch?v=YM0_8mOaKic' > /tmp/youtube-formats.txt 2>&1; then
             if grep -Eiq 'm4a|webm|audio' /tmp/youtube-formats.txt; then
