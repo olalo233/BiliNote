@@ -71,6 +71,7 @@ class VideoRequest(BaseModel):
 
 NOTE_OUTPUT_DIR = os.getenv("NOTE_OUTPUT_DIR", "note_results")
 UPLOAD_DIR = "uploads"
+UPLOAD_CHUNK_SIZE = 1024 * 1024
 
 
 def save_note_to_file(task_id: str, note):
@@ -188,13 +189,23 @@ def delete_task(data: RecordRequest):
 @router.post("/upload")
 async def upload(file: UploadFile = File(...)):
     os.makedirs(UPLOAD_DIR, exist_ok=True)
-    file_location = os.path.join(UPLOAD_DIR, file.filename)
+    # 浏览器可控的 filename 既不能当路径使用，也不能覆盖已有上传。
+    safe_filename = Path(file.filename or "upload.bin").name
+    stored_filename = f"{uuid.uuid4().hex}_{safe_filename}"
+    file_location = Path(UPLOAD_DIR) / stored_filename
 
-    with open(file_location, "wb+") as f:
-        f.write(await file.read())
+    try:
+        # 分块写入，避免大视频被 await file.read() 一次性读进内存。
+        with file_location.open("wb") as output:
+            while chunk := await file.read(UPLOAD_CHUNK_SIZE):
+                output.write(chunk)
+    except Exception:
+        file_location.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
 
-    # 假设你静态目录挂载了 /uploads
-    return R.success({"url": f"/uploads/{file.filename}"})
+    return R.success({"url": f"/uploads/{stored_filename}"})
 
 
 @router.post("/generate_note")

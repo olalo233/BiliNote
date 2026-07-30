@@ -133,6 +133,7 @@ const CheckboxGroup = ({
 const NoteForm = () => {
   const navigate = useNavigate();
   const [isUploading, setIsUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [uploadSuccess, setUploadSuccess] = useState(false)
   const [assetsEnabled, setAssetsEnabled] = useState(false)
   const [promptLibraryOpen, setPromptLibraryOpen] = useState(false)
@@ -246,13 +247,17 @@ const NoteForm = () => {
     const formData = new FormData()
     formData.append('file', file)
     setIsUploading(true)
+    setUploadProgress(0)
     setUploadSuccess(false)
 
     try {
-  
-      const  data  = await uploadFile(formData)
-        cb(data.url)
-        setUploadSuccess(true)
+      const data = await uploadFile(formData, event => {
+        if (event.total) {
+          setUploadProgress(Math.round((event.loaded / event.total) * 100))
+        }
+      })
+      cb(data.url)
+      setUploadSuccess(true)
     } catch (err) {
       console.error('上传失败:', err)
       // message.error('上传失败，请重试')
@@ -432,7 +437,9 @@ const NoteForm = () => {
                         }}
                       />
                       {isUploading ? (
-                        <p className="text-center text-sm text-blue-500">上传中，请稍候…</p>
+                        <p className="text-center text-sm text-blue-500">
+                          {uploadProgress === null ? '上传中，请稍候…' : `上传中：${uploadProgress}%`}
+                        </p>
                       ) : uploadSuccess ? (
                         <p className="text-center text-sm text-green-500">上传成功！</p>
                       ) : (
