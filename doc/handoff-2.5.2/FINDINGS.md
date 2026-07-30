@@ -4,6 +4,8 @@
 
 ## 需要 CI/NAS 才能完成的验收
 
+- 2026-07-30：在 Mac mini 上从当前源码完整重建时，`Dockerfile.complete` 固定的 BtbN FFmpeg 7.1.5 归档 URL 返回 HTTP 404。现有 `2.5.2-ex` 生产镜像不受影响；本次前端热修复以该镜像为基础叠加静态资源。下次完整构建/发版前须重新选择可用归档并更新校验和。
+
 - Fork CI run [29382737030](https://github.com/olalo233/BiliNote/actions/runs/29382737030) 在真正进入 smoke 前失败：`docker/build-push-action@v6` 拒绝不支持的 `progress` input，原 BtbN 归档 URL 返回 HTTP 404。已改为可访问的固定 FFmpeg 7.1.5 归档并显式校验 SHA256，同时用 `BUILDKIT_PROGRESS=plain` 保留可审计构建日志；需重新跑 CI 才能取得最终硬指标。
 - 后续 CI run [29382955194](https://github.com/olalo233/BiliNote/actions/runs/29382955194) 已完成镜像构建，但 smoke 因分支名被误用为 Docker tag（`feat/2.5.2` 含 `/`）在 `docker run` 前失败；已改为分支 smoke 使用 `latest`，tag smoke 才使用去掉 `v` 的 release 版本。
 - CI run [29383251692](https://github.com/olalo233/BiliNote/actions/runs/29383251692) 已证明镜像尺寸为 `1099834273` bytes（低于 1.2GB）、容器启动与基础 smoke 通过，随后因缓存断言把 BuildKit 的“操作行”和下一行的 `#N CACHED` 当成同一行而误报失败；已改为按 BuildKit step ID 配对验证。

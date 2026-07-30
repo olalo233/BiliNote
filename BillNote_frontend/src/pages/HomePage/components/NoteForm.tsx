@@ -407,7 +407,7 @@ const NoteForm = () => {
               <FormItem className="flex-1">
                 {platform === 'local' && (
                   <>
-                    <div
+                    <label
                       className="hover:border-primary mt-2 flex h-40 cursor-pointer items-center justify-center rounded-md border-2 border-dashed border-gray-300 transition-colors"
                       onDragOver={e => {
                         e.preventDefault()
@@ -418,17 +418,19 @@ const NoteForm = () => {
                         const file = e.dataTransfer.files?.[0]
                         if (file) handleFileUpload(file, field.onChange)
                       }}
-                      onClick={() => {
-                        const input = document.createElement('input')
-                        input.type = 'file'
-                        input.accept = 'video/*'
-                        input.onchange = e => {
-                          const file = (e.target as HTMLInputElement).files?.[0]
-                          if (file) handleFileUpload(file, field.onChange)
-                        }
-                        input.click()
-                      }}
                     >
+                      <input
+                        type="file"
+                        accept="video/*"
+                        className="sr-only"
+                        aria-label="选择本地视频文件"
+                        onChange={e => {
+                          const file = e.currentTarget.files?.[0]
+                          // Reset so choosing the same file again still triggers a change event.
+                          e.currentTarget.value = ''
+                          if (file) void handleFileUpload(file, field.onChange)
+                        }}
+                      />
                       {isUploading ? (
                         <p className="text-center text-sm text-blue-500">上传中，请稍候…</p>
                       ) : uploadSuccess ? (
@@ -439,7 +441,7 @@ const NoteForm = () => {
                           <span className="text-xs text-gray-400">或点击选择文件</span>
                         </p>
                       )}
-                    </div>
+                    </label>
                   </>
                 )}
                 <FormMessage />
